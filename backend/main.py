@@ -141,18 +141,33 @@ def get_thumb(path: str, size: int = 400):
 
 @app.get("/api/files/list-subfolders")
 def list_subfolders(path: str):
-    """Return immediate subdirectories of a given path."""
+    """Recursively walk all subdirectories and return those that directly contain
+    supported media files. Each entry includes the folder name, full path, and
+    the count of direct media files (not in deeper subdirs)."""
+    MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".avif",
+                  ".mp4", ".mov", ".avi", ".mkv", ".webm"}
     if not os.path.isabs(path):
         raise HTTPException(status_code=400, detail="Path must be absolute")
     if not os.path.isdir(path):
         raise HTTPException(status_code=404, detail="Directory not found")
     try:
-        entries = sorted(
-            {"name": name, "path": os.path.join(path, name)}
-            for name in os.listdir(path)
-            if os.path.isdir(os.path.join(path, name))
-        )
-        return {"subfolders": entries}
+        result = []
+        for dirpath, dirnames, filenames in os.walk(path):
+            # Count direct media files in this directory
+            media_count = sum(
+                1 for f in filenames
+                if os.path.splitext(f)[1].lower() in MEDIA_EXTS
+            )
+            if media_count > 0:
+                folder_name = os.path.basename(dirpath)
+                result.append({
+                    "name": folder_name,
+                    "path": dirpath,
+                    "media_count": media_count,
+                })
+        # Sort by path for consistent ordering
+        result.sort(key=lambda x: x["path"])
+        return {"subfolders": result}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

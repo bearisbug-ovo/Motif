@@ -23,6 +23,7 @@ type AlbumMode = 'none' | 'existing' | 'new'
 interface SubfolderConfig {
   name: string
   path: string
+  mediaCount: number
   personMode: PersonMode
   selectedPersonId: string
   newPersonName: string
@@ -58,7 +59,6 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
       fetchPersons()
       setSelectedPath('')
       setSelectedFiles([])
-      // Default modes depend on context
       if (defaultPersonId) {
         setPersonMode('existing')
         setSelectedPersonId(defaultPersonId)
@@ -87,7 +87,6 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
     if (pid) fetchAlbumsByPerson(pid)
   }, [selectedPersonId, personMode, fetchAlbumsByPerson])
 
-  // Extract folder name from path
   const getFolderName = (p: string) => {
     const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
     return parts[parts.length - 1] || ''
@@ -110,7 +109,6 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
         setSelectedPath('')
         setSubfolders([])
         setHasSubfolders(false)
-        // Use parent folder name as default names
         const firstPath = paths[0].replace(/\\/g, '/')
         const parentFolder = firstPath.split('/').slice(0, -1).pop() || ''
         if (!defaultPersonId && personMode === 'new') {
@@ -131,7 +129,6 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
     setSubfolders([])
     setHasSubfolders(false)
 
-    // Set default names from folder name
     const folderName = getFolderName(path)
     if (!defaultPersonId && personMode === 'new') {
       setNewPersonName(folderName)
@@ -143,11 +140,15 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
     setCheckingSubfolders(true)
     try {
       const { subfolders: subs } = await systemApi.listSubfolders(path)
-      if (subs.length > 0) {
+      // If more than 1 entry (or 1 entry that's not the root itself), use subfolder mode
+      const rootPath = path.replace(/\\/g, '/').replace(/\/$/, '')
+      const nonRootSubs = subs.filter(s => s.path.replace(/\\/g, '/').replace(/\/$/, '') !== rootPath)
+      if (nonRootSubs.length > 0) {
         setHasSubfolders(true)
         setSubfolders(subs.map((s) => ({
           name: s.name,
           path: s.path,
+          mediaCount: s.media_count,
           personMode: defaultPersonId ? 'existing' as PersonMode : 'new' as PersonMode,
           selectedPersonId: defaultPersonId || '',
           newPersonName: s.name,
@@ -155,6 +156,9 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
           selectedAlbumId: '',
           newAlbumName: s.name,
         })))
+      } else {
+        // Single folder with images — no subfolder mode
+        setHasSubfolders(false)
       }
     } catch {
       // ignore
@@ -218,13 +222,14 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
             sf.personMode, sf.selectedPersonId, sf.newPersonName,
             sf.albumMode, sf.selectedAlbumId, sf.newAlbumName,
           )
-          const result = await mediaApi.importMedia({ paths: [sf.path], person_id: personId, album_id: albumId })
+          // Import only direct files in this folder (not recursive)
+          const result = await mediaApi.importMedia({ paths: [sf.path], person_id: personId, album_id: albumId, recursive: false })
           if (result.mode === 'background') {
             await pollUntilDone(result.token, () => {})
           }
         }
         setImportProgress({ done: subfolders.length, total: subfolders.length, current: '' })
-        toast({ title: `导入完成：${subfolders.length} 个子文件夹` })
+        toast({ title: `导入完成：${subfolders.length} 个文件夹` })
       } else {
         const importPaths = selectedFiles.length > 0 ? selectedFiles : [selectedPath]
         setImportProgress({ done: 0, total: 1, current: selectedPath || `${selectedFiles.length} 个文件` })
@@ -252,75 +257,11 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
     }
   }
 
-  const PersonAlbumSelector = ({
-    personMode: pMode, selectedPersonId: sPId, newPersonName: nPName,
-    albumMode: aMode, selectedAlbumId: sAId, newAlbumName: nAName,
-    onChange,
-  }: {
-    personMode: PersonMode; selectedPersonId: string; newPersonName: string
-    albumMode: AlbumMode; selectedAlbumId: string; newAlbumName: string
-    onChange: (patch: Partial<SubfolderConfig>) => void
-  }) => (
-    <div className="space-y-2">
-      {/* Person */}
-      <div>
-        <div className="flex gap-1.5 mb-1">
-          {(['none', 'existing', 'new'] as PersonMode[]).map((m) => (
-            <Button key={m} variant={pMode === m ? 'default' : 'outline'} size="sm"
-              className="h-7 text-xs px-2"
-              onClick={() => onChange({ personMode: m, selectedPersonId: '', newPersonName: '' })}
-            >
-              {m === 'none' ? '无人物' : m === 'existing' ? '已有' : '新建'}
-            </Button>
-          ))}
-          {pMode !== 'none' && <span className="text-xs text-muted-foreground self-center">人物</span>}
-        </div>
-        {pMode === 'existing' && (
-          <select className="w-full h-7 rounded border border-input bg-background px-2 text-xs"
-            value={sPId} onChange={(e) => onChange({ selectedPersonId: e.target.value })}>
-            <option value="">选择人物...</option>
-            {persons.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        )}
-        {pMode === 'new' && (
-          <Input className="h-7 text-xs" placeholder="人物姓名..."
-            value={nPName} onChange={(e) => onChange({ newPersonName: e.target.value })} />
-        )}
-      </div>
-
-      {/* Album */}
-      <div>
-        <div className="flex gap-1.5 mb-1">
-          {(['none', 'existing', 'new'] as AlbumMode[]).map((m) => (
-            <Button key={m} variant={aMode === m ? 'default' : 'outline'} size="sm"
-              className="h-7 text-xs px-2"
-              onClick={() => onChange({ albumMode: m })}
-            >
-              {m === 'none' ? '无图集' : m === 'existing' ? '已有' : '新建'}
-            </Button>
-          ))}
-          {aMode !== 'none' && <span className="text-xs text-muted-foreground self-center">图集</span>}
-        </div>
-        {aMode === 'existing' && (
-          <select className="w-full h-7 rounded border border-input bg-background px-2 text-xs"
-            value={sAId} onChange={(e) => onChange({ selectedAlbumId: e.target.value })}>
-            <option value="">选择图集...</option>
-            {albums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-        )}
-        {aMode === 'new' && (
-          <Input className="h-7 text-xs" placeholder="图集名称..."
-            value={nAName} onChange={(e) => onChange({ newAlbumName: e.target.value })} />
-        )}
-      </div>
-    </div>
-  )
-
   const hasSelection = selectedPath || selectedFiles.length > 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>导入图片</DialogTitle>
         </DialogHeader>
@@ -349,7 +290,7 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto space-y-5 pr-1">
-            {/* Folder / file selection */}
+            {/* Source selection */}
             <div>
               <label className="text-sm font-medium mb-2 block">选择来源</label>
               <div className="flex gap-2">
@@ -369,25 +310,93 @@ export function ImportDialog({ open, onOpenChange, defaultPersonId, defaultAlbum
               </div>
             </div>
 
-            {/* Subfolder mode */}
+            {/* Subfolder mode — 3-column table layout */}
             {hasSubfolders ? (
               <div>
                 <label className="text-sm font-medium mb-2 block">
-                  检测到 {subfolders.length} 个子文件夹，请分别配置：
+                  检测到 {subfolders.length} 个含图片的文件夹：
                 </label>
-                <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
+                {/* Table header */}
+                <div className="grid grid-cols-[1fr_1fr_1fr] gap-2 px-3 py-1.5 text-xs text-muted-foreground font-medium border-b border-border">
+                  <span>文件夹</span>
+                  <span>人物</span>
+                  <span>图集</span>
+                </div>
+                {/* Table rows */}
+                <div className="max-h-[45vh] overflow-y-auto">
                   {subfolders.map((sf, idx) => (
-                    <div key={sf.path} className="border border-border rounded-md p-3 space-y-2">
-                      <p className="text-sm font-medium text-foreground">{sf.name}</p>
-                      <PersonAlbumSelector
-                        personMode={sf.personMode}
-                        selectedPersonId={sf.selectedPersonId}
-                        newPersonName={sf.newPersonName}
-                        albumMode={sf.albumMode}
-                        selectedAlbumId={sf.selectedAlbumId}
-                        newAlbumName={sf.newAlbumName}
-                        onChange={(patch) => updateSubfolder(idx, patch)}
-                      />
+                    <div key={sf.path} className="grid grid-cols-[1fr_1fr_1fr] gap-2 px-3 py-2 border-b border-border/50 items-center hover:bg-accent/30">
+                      {/* Column 1: Folder name + count */}
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate" title={sf.path}>{sf.name}</p>
+                        <p className="text-xs text-muted-foreground">{sf.mediaCount} 张</p>
+                      </div>
+                      {/* Column 2: Person */}
+                      <div className="min-w-0">
+                        {sf.personMode === 'new' ? (
+                          <Input
+                            className="h-8 text-sm"
+                            placeholder="新建人物名..."
+                            value={sf.newPersonName}
+                            onChange={(e) => updateSubfolder(idx, { newPersonName: e.target.value })}
+                          />
+                        ) : sf.personMode === 'existing' ? (
+                          <select
+                            className="w-full h-8 rounded border border-input bg-background px-2 text-sm"
+                            value={sf.selectedPersonId}
+                            onChange={(e) => updateSubfolder(idx, { selectedPersonId: e.target.value })}
+                          >
+                            <option value="">选择人物...</option>
+                            {persons.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                        <div className="flex gap-1 mt-1">
+                          {(['new', 'existing', 'none'] as PersonMode[]).map((m) => (
+                            <button
+                              key={m}
+                              className={`text-xs px-1.5 py-0.5 rounded ${sf.personMode === m ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                              onClick={() => updateSubfolder(idx, { personMode: m, selectedPersonId: '', newPersonName: m === 'new' ? sf.name : '' })}
+                            >
+                              {m === 'new' ? '新建' : m === 'existing' ? '已有' : '无'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {/* Column 3: Album */}
+                      <div className="min-w-0">
+                        {sf.albumMode === 'new' ? (
+                          <Input
+                            className="h-8 text-sm"
+                            placeholder="新建图集名..."
+                            value={sf.newAlbumName}
+                            onChange={(e) => updateSubfolder(idx, { newAlbumName: e.target.value })}
+                          />
+                        ) : sf.albumMode === 'existing' ? (
+                          <select
+                            className="w-full h-8 rounded border border-input bg-background px-2 text-sm"
+                            value={sf.selectedAlbumId}
+                            onChange={(e) => updateSubfolder(idx, { selectedAlbumId: e.target.value })}
+                          >
+                            <option value="">选择图集...</option>
+                            {albums.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                        <div className="flex gap-1 mt-1">
+                          {(['new', 'existing', 'none'] as AlbumMode[]).map((m) => (
+                            <button
+                              key={m}
+                              className={`text-xs px-1.5 py-0.5 rounded ${sf.albumMode === m ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                              onClick={() => updateSubfolder(idx, { albumMode: m, newAlbumName: m === 'new' ? sf.name : '' })}
+                            >
+                              {m === 'new' ? '新建' : m === 'existing' ? '已有' : '无'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>

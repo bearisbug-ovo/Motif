@@ -31,6 +31,7 @@ class ImportRequest(BaseModel):
     paths: List[str]
     person_id: Optional[str] = None
     album_id: Optional[str] = None
+    recursive: bool = True  # False = only direct files in directory, no subdirs
 
 
 class MediaUpdate(BaseModel):
@@ -70,15 +71,21 @@ def _media_dict(m: Media) -> dict:
     }
 
 
-def _resolve_paths(paths: List[str]) -> List[str]:
-    """Expand dirs to individual files."""
+def _resolve_paths(paths: List[str], recursive: bool = True) -> List[str]:
+    """Expand dirs to individual files.  When recursive=False, only direct children are included."""
     result = []
     for p in paths:
         if os.path.isdir(p):
-            for root, _, files in os.walk(p):
-                for f in files:
-                    fp = os.path.join(root, f)
-                    if Path(fp).suffix.lower() in SUPPORTED_EXTS:
+            if recursive:
+                for root, _, files in os.walk(p):
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        if Path(fp).suffix.lower() in SUPPORTED_EXTS:
+                            result.append(fp)
+            else:
+                for f in os.listdir(p):
+                    fp = os.path.join(p, f)
+                    if os.path.isfile(fp) and Path(fp).suffix.lower() in SUPPORTED_EXTS:
                         result.append(fp)
         elif os.path.isfile(p) and Path(p).suffix.lower() in SUPPORTED_EXTS:
             result.append(p)
@@ -209,7 +216,7 @@ async def import_media(body: ImportRequest, background_tasks: BackgroundTasks, d
     if body.album_id and not db.get(Album, body.album_id):
         raise HTTPException(status_code=404, detail="Album not found")
 
-    files = _resolve_paths(body.paths)
+    files = _resolve_paths(body.paths, recursive=body.recursive)
     if not files:
         raise HTTPException(status_code=400, detail="No supported media files found in the given paths")
 
