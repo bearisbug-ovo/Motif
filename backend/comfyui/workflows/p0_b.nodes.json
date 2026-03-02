@@ -1,0 +1,5 @@
+{
+  "input_image":       {"node_id": "1", "key": "image"},
+  "face_crop_width":   {"node_id": "2", "key": "crop_width"},
+  "face_crop_height":  {"node_id": "2", "key": "crop_height"}
+}

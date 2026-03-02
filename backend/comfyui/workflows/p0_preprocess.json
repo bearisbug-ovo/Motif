@@ -1,0 +1,40 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "test_face.png"
+    }
+  },
+  "2": {
+    "class_type": "ACE_ImageFaceCrop",
+    "inputs": {
+      "image": ["1", 0],
+      "model": "insightface",
+      "crop_width": 768,
+      "crop_height": 768
+    }
+  },
+  "3": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["2", 0],
+      "filename_prefix": "p0_face_crop"
+    }
+  },
+  "4": {
+    "class_type": "easy imageRemBg",
+    "inputs": {
+      "images": ["2", 0],
+      "rem_mode": "Inspyrenet",
+      "image_output": "Save",
+      "save_prefix": "p0_face_crop_nobg"
+    }
+  },
+  "5": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["4", 0],
+      "filename_prefix": "p0_face_crop_nobg_preview"
+    }
+  }
+}

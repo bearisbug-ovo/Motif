@@ -1,0 +1,9 @@
+{
+  "pose_image":        {"node_id": "1",  "key": "image"},
+  "positive_prompt":   {"node_id": "10", "key": "text"},
+  "seed":              {"node_id": "15", "key": "seed"},
+  "steps":             {"node_id": "15", "key": "steps"},
+  "cfg":               {"node_id": "15", "key": "cfg"},
+  "controlnet_strength": {"node_id": "8", "key": "strength"},
+  "filename_prefix":   {"node_id": "17", "key": "filename_prefix"}
+}

@@ -1,0 +1,11 @@
+{
+  "positive_prompt": {"node_id": "4", "key": "text"},
+  "seed":            {"node_id": "9", "key": "seed"},
+  "steps":           {"node_id": "9", "key": "steps"},
+  "cfg":             {"node_id": "9", "key": "cfg"},
+  "scheduler":       {"node_id": "9", "key": "scheduler"},
+  "width":           {"node_id": "7", "key": "width"},
+  "height":          {"node_id": "7", "key": "height"},
+  "unet_name":       {"node_id": "1", "key": "unet_name"},
+  "filename_prefix": {"node_id": "11", "key": "filename_prefix"}
+}

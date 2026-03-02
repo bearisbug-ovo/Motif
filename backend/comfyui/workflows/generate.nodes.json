@@ -1,0 +1,14 @@
+{
+  "unet_name":       {"node_id": "1",  "key": "unet_name"},
+  "lora_name":       {"node_id": "2",  "key": "lora_name"},
+  "lora_strength":   {"node_id": "2",  "key": "strength_model"},
+  "positive_prompt": {"node_id": "5",  "key": "text"},
+  "seed":            {"node_id": "10", "key": "seed"},
+  "steps":           {"node_id": "10", "key": "steps"},
+  "cfg":             {"node_id": "10", "key": "cfg"},
+  "scheduler":       {"node_id": "10", "key": "scheduler"},
+  "width":           {"node_id": "8",  "key": "width"},
+  "height":          {"node_id": "8",  "key": "height"},
+  "vae_name":         {"node_id": "4",  "key": "vae_name"},
+  "filename_prefix": {"node_id": "12", "key": "filename_prefix"}
+}

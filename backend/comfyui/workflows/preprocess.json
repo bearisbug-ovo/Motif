@@ -1,0 +1,25 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "test_face.png"
+    }
+  },
+  "2": {
+    "class_type": "easy imageRemBg",
+    "inputs": {
+      "images": ["1", 0],
+      "rem_mode": "Inspyrenet",
+      "image_output": "Hide",
+      "save_prefix": "ComfyUI",
+      "add_background": "white"
+    }
+  },
+  "3": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": ["2", 0],
+      "filename_prefix": "processed/face_nobg"
+    }
+  }
+}

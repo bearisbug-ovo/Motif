@@ -1,0 +1,4 @@
+{
+  "input_image":     {"node_id": "1", "key": "image"},
+  "filename_prefix": {"node_id": "3", "key": "filename_prefix"}
+}

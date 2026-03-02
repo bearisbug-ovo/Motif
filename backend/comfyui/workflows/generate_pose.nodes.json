@@ -1,0 +1,16 @@
+{
+  "skeleton_image":      {"node_id": "1",  "key": "image"},
+  "unet_name":           {"node_id": "2",  "key": "unet_name"},
+  "lora_name":           {"node_id": "3",  "key": "lora_name"},
+  "lora_strength":       {"node_id": "3",  "key": "strength_model"},
+  "controlnet_strength": {"node_id": "6",  "key": "strength"},
+  "positive_prompt":     {"node_id": "8",  "key": "text"},
+  "seed":                {"node_id": "13", "key": "seed"},
+  "steps":               {"node_id": "13", "key": "steps"},
+  "cfg":                 {"node_id": "13", "key": "cfg"},
+  "scheduler":           {"node_id": "13", "key": "scheduler"},
+  "width":               {"node_id": "11", "key": "width"},
+  "height":              {"node_id": "11", "key": "height"},
+  "vae_name":            {"node_id": "5",  "key": "vae_name"},
+  "filename_prefix":     {"node_id": "15", "key": "filename_prefix"}
+}

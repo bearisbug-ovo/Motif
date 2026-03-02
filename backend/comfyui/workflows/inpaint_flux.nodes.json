@@ -1,0 +1,8 @@
+{
+  "source_image":    {"node_id": "1",  "key": "image"},
+  "mask_image":      {"node_id": "2",  "key": "image"},
+  "extra_prompt":    {"node_id": "9",  "key": "text"},
+  "seed":            {"node_id": "13", "key": "seed"},
+  "denoise":         {"node_id": "13", "key": "denoise"},
+  "filename_prefix": {"node_id": "17", "key": "filename_prefix"}
+}
