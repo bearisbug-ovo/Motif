@@ -12,7 +12,7 @@
 
 ## 项目概述
 
-Motif — 本地图片/视频浏览、管理、AI 修复与联想生成工具。以 ComfyUI 为 AI 后端，React PWA 前端，支持局域网多设备访问。核心：以人物为核心的媒体管理体系、不复制文件（路径引用）、任务严格串行队列。详细需求见 `doc/Motif_PRD_v1.0-rc.md`。
+Motif — 本地图片/视频浏览、管理、AI 修复与联想生成工具。以 ComfyUI 为 AI 后端，React PWA 前端，支持局域网多设备访问。核心：以人物为核心的媒体管理体系、不复制文件（路径引用）、任务严格串行队列。详细需求见 `doc/prd.md`。
 
 ## 常用命令
 
@@ -140,6 +140,14 @@ AppData/（路径可配置，默认 backend/appdata/）
 - 人脸参考 → easy imageRemBg(white) → TextEncodeQwenImageEditPlus.image2
 - Prompt：`"将图中人物面部替换为参考图中的人脸，保持身体姿势、服装和背景完全不变，边缘自然融合"`
 
-## 参考文档
+## 项目文档
 
-详细需求见 `doc/Motif_PRD_v1.0-rc.md`。
+| 文档 | 路径 | 说明 |
+|---|---|---|
+| 产品需求文档 | `doc/prd.md` | 完整功能定义、UI 规格、数据模型、API 约定（P0-P3 全量） |
+| PRD 审查报告 | `doc/prd_review.md` | PRD 与实际实现的差异分析、命名不一致、未实现功能清单、修订建议 |
+| 开发指南 | `doc/development_guide.md` | 环境搭建、架构详解、全量 API 参考（~45 端点）、数据模型、任务队列、前端状态管理 |
+| 测试计划 | `doc/test_plan.md` | 127 个 Puppeteer E2E 测试用例，按 PRD 章节组织，含需求追溯矩阵 |
+| 图生图/写真 Spec | `doc/img2img_portrait_spec.md` | P2 图生图 & 写真生成方案验证草稿（ComfyUI 工作流 + 提示词策略） |
+
+**命名规范**：`doc/` 下统一 `snake_case.md`，不加项目前缀，不加版本号。版本信息写在文档内部 header 中，历史由 Git 管理。
