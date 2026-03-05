@@ -32,8 +32,8 @@ export const albumsApi = {
   list: (personId?: string, sort?: AlbumSortField, filterRating?: string) =>
     http.get<Album[]>('/albums', { params: { person_id: personId, sort, filter_rating: filterRating } }).then(r => r.data),
 
-  listByPerson: (personId: string, sort?: AlbumSortField) =>
-    http.get<Album[]>(`/albums/by-person/${personId}`, { params: { sort } }).then(r => r.data),
+  listByPerson: (personId: string, sort?: AlbumSortField, filterRating?: string) =>
+    http.get<Album[]>(`/albums/by-person/${personId}`, { params: { sort, filter_rating: filterRating } }).then(r => r.data),
 
   get: (id: string) =>
     http.get<Album>(`/albums/${id}`).then(r => r.data),

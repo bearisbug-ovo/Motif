@@ -1,10 +1,13 @@
 import { create } from 'zustand'
 import { mediaApi, MediaItem, MediaSortField } from '@/api/media'
+import { getSortDefault, getFilterDefault, SortPageKey } from '@/lib/filterDefaults'
 
 interface LightboxContext {
   albumId?: string
   personId?: string
   onCoverSet?: () => void
+  exploreMode?: boolean
+  onReshuffle?: () => void
 }
 
 // Global callback for when a rating changes — pages can subscribe to refetch parent entities
@@ -24,6 +27,10 @@ interface MediaStore {
   lightboxItems: MediaItem[]
   lightboxContext: LightboxContext
 
+  // Multi-select
+  multiSelectMode: boolean
+  selectedIds: Set<string>
+
   fetchByAlbum: (albumId: string) => Promise<void>
   fetchLoose: (personId: string) => Promise<void>
   updateMedia: (id: string, data: { rating?: number | null; album_id?: string; person_id?: string }) => Promise<void>
@@ -31,10 +38,20 @@ interface MediaStore {
   setSort: (sort: MediaSortField) => void
   setFilterRating: (f: string | undefined) => void
   setSourceType: (t: string | undefined) => void
+  resetFilters: (pageKey: SortPageKey) => void
   openLightbox: (items: MediaItem[], index: number, context?: LightboxContext) => void
   closeLightbox: () => void
   lightboxNext: () => void
   lightboxPrev: () => void
+
+  // Multi-select actions
+  setMultiSelectMode: (on: boolean) => void
+  toggleSelection: (id: string) => void
+  selectAll: () => void
+  clearSelection: () => void
+  batchRate: (rating: number) => Promise<void>
+  batchDelete: () => Promise<void>
+  batchMoveToAlbum: (albumId: string) => Promise<void>
 }
 
 export const useMediaStore = create<MediaStore>((set, get) => ({
@@ -47,6 +64,9 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
   lightboxIndex: null,
   lightboxItems: [],
   lightboxContext: {},
+
+  multiSelectMode: false,
+  selectedIds: new Set<string>(),
 
   fetchByAlbum: async (albumId) => {
     set({ loading: true })
@@ -62,8 +82,8 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
   fetchLoose: async (personId) => {
     set({ loading: true })
     try {
-      const { sort, filterRating } = get()
-      const looseItems = await mediaApi.listLoose(personId, { sort, filter_rating: filterRating })
+      const { sort, filterRating, sourceType } = get()
+      const looseItems = await mediaApi.listLoose(personId, { sort, filter_rating: filterRating, source_type: sourceType })
       set({ looseItems, loading: false })
     } catch {
       set({ loading: false })
@@ -107,6 +127,11 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
   setSort: (sort) => set({ sort }),
   setFilterRating: (filterRating) => set({ filterRating }),
   setSourceType: (sourceType) => set({ sourceType }),
+  resetFilters: (pageKey) => set({
+    sort: getSortDefault(pageKey) as MediaSortField,
+    filterRating: getFilterDefault('filterRating') || undefined,
+    sourceType: getFilterDefault('sourceType') || undefined,
+  }),
 
   openLightbox: (lightboxItems, lightboxIndex, lightboxContext = {}) => set({ lightboxItems, lightboxIndex, lightboxContext }),
   closeLightbox: () => set({ lightboxIndex: null, lightboxItems: [], lightboxContext: {} }),
@@ -121,5 +146,56 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
     const { lightboxIndex } = get()
     if (lightboxIndex === null) return
     set({ lightboxIndex: Math.max(lightboxIndex - 1, 0) })
+  },
+
+  // Multi-select
+  setMultiSelectMode: (on) => set({ multiSelectMode: on, selectedIds: new Set() }),
+
+  toggleSelection: (id) => set((s) => {
+    const next = new Set(s.selectedIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return { selectedIds: next }
+  }),
+
+  selectAll: () => set((s) => {
+    const allIds = [...s.items, ...s.looseItems].map((m) => m.id)
+    return { selectedIds: new Set(allIds) }
+  }),
+
+  clearSelection: () => set({ selectedIds: new Set() }),
+
+  batchRate: async (rating) => {
+    const { selectedIds } = get()
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    await mediaApi.batchUpdate({ ids, rating })
+    // Refresh items in store
+    set((s) => ({
+      items: s.items.map((m) => ids.includes(m.id) ? { ...m, rating } : m),
+      looseItems: s.looseItems.map((m) => ids.includes(m.id) ? { ...m, rating } : m),
+    }))
+    _onRatingChangeCallback?.()
+  },
+
+  batchDelete: async () => {
+    const { selectedIds } = get()
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    await mediaApi.batchDelete(ids)
+    set((s) => ({
+      items: s.items.filter((m) => !ids.includes(m.id)),
+      looseItems: s.looseItems.filter((m) => !ids.includes(m.id)),
+      selectedIds: new Set(),
+      multiSelectMode: false,
+    }))
+  },
+
+  batchMoveToAlbum: async (albumId) => {
+    const { selectedIds } = get()
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    await mediaApi.batchUpdate({ ids, album_id: albumId })
+    set({ selectedIds: new Set(), multiSelectMode: false })
   },
 }))

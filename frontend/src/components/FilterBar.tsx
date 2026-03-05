@@ -16,9 +16,9 @@ export function FilterBar({
   sourceType, onSourceTypeChange,
 }: FilterBarProps) {
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
       <Select value={sortField} onValueChange={onSortChange}>
-        <SelectTrigger className="w-36 h-8 text-xs">
+        <SelectTrigger className="w-[5.5rem] sm:w-32 h-7 sm:h-8 text-xs">
           <SelectValue placeholder="排序" />
         </SelectTrigger>
         <SelectContent>
@@ -30,8 +30,8 @@ export function FilterBar({
 
       {onRatingFilterChange && (
         <Select value={ratingFilter || 'all'} onValueChange={(v) => onRatingFilterChange(v === 'all' ? '' : v)}>
-          <SelectTrigger className="w-28 h-8 text-xs">
-            <SelectValue placeholder="评分筛选" />
+          <SelectTrigger className="w-20 sm:w-28 h-7 sm:h-8 text-xs">
+            <SelectValue placeholder="评分" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部评分</SelectItem>
@@ -45,8 +45,8 @@ export function FilterBar({
 
       {onSourceTypeChange && (
         <Select value={sourceType || 'all'} onValueChange={(v) => onSourceTypeChange(v === 'all' ? '' : v)}>
-          <SelectTrigger className="w-28 h-8 text-xs">
-            <SelectValue placeholder="来源类型" />
+          <SelectTrigger className="w-20 sm:w-28 h-7 sm:h-8 text-xs">
+            <SelectValue placeholder="来源" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部来源</SelectItem>

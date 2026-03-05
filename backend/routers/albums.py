@@ -178,11 +178,26 @@ def delete_album(
 def list_albums_by_person(
     pid: str,
     sort: str = Query("created_at", regex="^(created_at|avg_rating|name)$"),
+    filter_rating: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     if not db.get(Person, pid):
         raise HTTPException(status_code=404, detail="Person not found")
     q = select(Album).where(Album.person_id == pid)
+
+    if filter_rating:
+        try:
+            op, val = filter_rating.split(":", 1)
+            val_int = int(val)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="filter_rating format: op:value")
+        if op == "eq":
+            q = q.where(Album.avg_rating == val_int)
+        elif op == "gte":
+            q = q.where(Album.avg_rating >= val_int)
+        elif op == "lte":
+            q = q.where(Album.avg_rating <= val_int)
+
     if sort == "avg_rating":
         q = q.order_by(Album.avg_rating.desc().nullslast(), Album.created_at.desc())
     elif sort == "name":

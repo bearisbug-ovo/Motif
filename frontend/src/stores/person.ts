@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { personsApi, Person, PersonSortField } from '@/api/persons'
+import { getSortDefault, getFilterDefault } from '@/lib/filterDefaults'
 
 interface PersonStore {
   persons: Person[]
@@ -14,6 +15,7 @@ interface PersonStore {
   deletePerson: (id: string, mode?: 'person_only' | 'person_and_albums' | 'all') => Promise<void>
   setSort: (sort: PersonSortField) => void
   setFilterRating: (f: string | undefined) => void
+  resetFilters: () => void
 }
 
 export const usePersonStore = create<PersonStore>((set, get) => ({
@@ -61,13 +63,10 @@ export const usePersonStore = create<PersonStore>((set, get) => ({
     }))
   },
 
-  setSort: (sort) => {
-    set({ sort })
-    get().fetchPersons()
-  },
-
-  setFilterRating: (filterRating) => {
-    set({ filterRating })
-    get().fetchPersons()
-  },
+  setSort: (sort) => set({ sort }),
+  setFilterRating: (filterRating) => set({ filterRating }),
+  resetFilters: () => set({
+    sort: getSortDefault('media-library') as PersonSortField,
+    filterRating: getFilterDefault('filterRating') || undefined,
+  }),
 }))
