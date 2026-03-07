@@ -20,6 +20,7 @@ class Task(Base):
     queue_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     execution_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # immediate | queued
     result_media_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+    result_outputs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON dict of outputs (text + image paths)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

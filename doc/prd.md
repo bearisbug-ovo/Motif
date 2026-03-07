@@ -29,7 +29,8 @@
 | **P1 — 核心 AI 功能** | 高清放大、换脸（单张+批量）、局部修复（带提示词+自动反推）、任务队列（含 4 种启动模式）、工作区 | 可对图片执行 AI 操作并管理任务队列，生成链可视化可用 |
 | **P2 — 高级 AI 功能** | 图生图、写真生成、动作库（DWPose 管理+动作组） | 图生图含提示词反推+润色完整链路可用，动作库支持批量提取和引用 |
 | **P3 — 扩展工具** | 网页图片抓取器（5 平台适配）、平台账号管理 | 至少 2 个平台（小红书+通用网页）可用，其余平台可后续迭代 |
-| **P3-UI — 前端 UI/UX 改进** | 设计 token 三层架构、视觉升级（Inter 字体/玻璃态/渐变/骨架屏）、体验打磨（路由过渡/入场动画）、性能优化（Zustand selector/虚拟化） | WCAG AA 对比度合规，骨架屏替代加载文字，1000+ 列表流畅滚动。详见 `doc/ui_improvement_plan.md` |
+| **P3-UI — 前端 UI/UX 改进** | 设计 token 三层架构、视觉升级（Inter 字体/空状态组件/卡片阴影）、体验打磨（stagger 入场动画/useDevice 统一/prefers-reduced-motion）、性能优化（Zustand selector/虚拟化，待开始） | WCAG AA 对比度合规，加载中显示空白（不使用骨架屏），EmptyState 组件替代空文字（仅在 `!loading` 确认数据为空后显示）。A/B/C 阶段已完成，D 阶段待开始。详见 `doc/ui_improvement_plan.md` |
+| **P4 — 工作流管理** | 数据驱动的工作流注册系统、ComfyUI JSON 导入 + 可视化参数映射、AI 工具 Tab | 用户可通过前端导入 ComfyUI 工作流 JSON 并注册，无需改 Python 代码 |
 
 > 每个功能在下文中以 `[P0]` `[P1]` `[P2]` `[P3]` 标注所属阶段。
 
@@ -84,25 +85,25 @@ ComfyUI（本地运行）
 用户双击 `start.bat`（调用 `start.ps1`），启动器自动完成以下步骤：
 
 1. **单实例检测**：通过命名 Mutex 防止重复启动，已有实例时提示并退出
-2. **清理旧进程**：检测并关闭占用端口 8000（后端）、5173（前端）的旧进程
-3. **启动后端**：以隐藏窗口启动 `uvicorn`，日志写入 `.logs/backend.log`，等待端口 8000 就绪（超时 30 秒）
-4. **启动前端**：以隐藏窗口启动 `npm run dev`，日志写入 `.logs/frontend.log`，等待端口 5173 就绪（超时 20 秒）
+2. **清理旧进程**：检测并关闭占用端口 8000 的旧进程
+3. **构建前端**：执行 `npm run build`，生成生产包到 `frontend/dist/`（含 PWA Service Worker）
+4. **启动后端**：以隐藏窗口启动 `uvicorn`，日志写入 `.logs/backend.log`，等待端口 8000 就绪（超时 30 秒）。后端同时 serve 前端静态文件
 5. **启动 ComfyUI**：检测 ComfyUI 是否已运行（请求 `/object_info/KSampler`），未运行则拉起（独立进程，不随启动器退出）
-6. **打开浏览器**：自动打开 `http://localhost:5173`
+6. **打开浏览器**：自动打开 `http://localhost:8000`
 7. **进入交互模式**：显示服务状态和可用命令，等待用户输入
 
 #### 交互命令
 
 | 按键 | 行为 |
 |------|------|
-| `r` / `R` | 快速重启后端 + 前端（不重启 ComfyUI） |
+| `r` / `R` | 重新构建前端 + 重启后端（不重启 ComfyUI） |
 | `Enter`（或其他任意输入） | 停止所有服务并退出启动器 |
 
 #### 进程管理
 
-- 后端和前端进程通过 Win32 Job Object 绑定到启动器，启动器退出时自动终止所有子进程
+- 后端进程通过 Win32 Job Object 绑定到启动器，启动器退出时自动终止
 - ComfyUI 作为独立进程启动，不受启动器生命周期影响
-- 所有日志输出到项目根目录 `.logs/` 下：`backend.log`、`backend-error.log`、`frontend.log`、`frontend-error.log`
+- 日志输出到项目根目录 `.logs/` 下：`backend.log`、`backend-error.log`
 
 #### 前端 ComfyUI 状态
 
@@ -144,7 +145,7 @@ ComfyUI（本地运行）
 | name | string | 姓名 |
 | cover_media_id | UUID? | 封面媒体 ID，默认第一张 |
 | created_at | datetime | 创建时间 |
-| avg_rating | float? | 平均评分（仅计算已评分媒体，全部未评分时为 null） |
+| avg_rating | float? | 加权平均评分（已评分用实际分，未评分按 2.5 计入；无媒体时为 null） |
 | rated_count | int | 已评分媒体数量（用于前端显示"基于 N 张已评分"） |
 
 ### 3.3 Album（图集）
@@ -156,7 +157,7 @@ ComfyUI（本地运行）
 | name | string | 图集名称 |
 | cover_media_id | UUID? | 封面，默认第一张 |
 | created_at | datetime | 导入时间 |
-| avg_rating | float? | 平均评分（仅计算已评分媒体，全部未评分时为 null） |
+| avg_rating | float? | 加权平均评分（已评分用实际分，未评分按 2.5 计入；无媒体时为 null） |
 | rated_count | int | 已评分媒体数量 |
 | is_generated_album | bool | 是否为 AI 生成图集（如批量换脸、写真套图） |
 | source_face_media_id | UUID? | 生成图集关联的人脸参考图 |
@@ -205,6 +206,7 @@ ComfyUI（本地运行）
 | finished_at | datetime? | 完成/失败/取消时间 |
 | error_message | string? | 失败原因 |
 | result_media_ids | JSON? | 生成结果的 Media ID 列表 |
+| result_outputs | JSON? | 输出结果，包含文本输出（如反推提示词）和图片输出（`{"type": "image", "path": "..."}`），格式 `{"key": value}` |
 | execution_mode | enum | `immediate`（立即执行）/ `queued`（加入队列） |
 
 ### 3.6 QueueConfig（队列配置，全局单例）
@@ -296,7 +298,21 @@ ComfyUI（本地运行）
 | status | enum | `pending` / `completed` / `failed` |
 | error_message | string? | 失败原因 |
 
-### 3.12 数据库设计规范
+### 3.12 Workflow（工作流）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | string (UUID) | 主键 |
+| name | string(200) | 工作流名称，全局唯一 |
+| category | string(50) | 类别：face_swap / inpaint / upscale / text_to_image / image_to_image / preprocess |
+| description | text? | 描述 |
+| is_default | bool | 是否为该 category 的默认工作流 |
+| workflow_json | text | ComfyUI API 格式 JSON |
+| manifest | text | 参数映射 JSON：`{"mappings": {param_name: {node_id, key, type}}, "output_mappings"?: {output_name: {node_id, key}}, "extra_params"?: [{name, label, type, node_id, key}]}` |
+| created_at | datetime | 创建时间 |
+| updated_at | datetime | 更新时间 |
+
+### 3.13 数据库设计规范
 
 **索引策略（SQLite）：**
 
@@ -367,7 +383,7 @@ ComfyUI（本地运行）
 
 ### 5.1 左侧导航栏 `[P0]`
 
-收起时显示图标，展开时显示图标 + 文字，默认收起。
+固定宽度（`w-44` = 176px）展开，始终显示图标 + 文字。`md` 断点以上显示侧边栏，移动端使用底部导航栏。
 
 ```
 [Motif Logo]
@@ -406,10 +422,13 @@ ComfyUI（本地运行）
 - 导入图片（弹出导入流程）
 - 随机探索（全局范围，见 8.8 节）
 
-**人物卡片右键菜单：**
-- 重命名
-- 设为封面（从该人物图片中选）
-- 删除人物（弹窗三选一）：
+**人物卡片右键菜单（PersonCard 与人物主页空白区域一致）：**
+- 重命名人物
+- 导入
+- 新建图集
+- ---
+- 清理低分图（批量清理流程，见 §8.7）
+- 删除人物（弹窗三选一，红色危险操作）：
   - 仅删除人物，图片/图集变为无人物散图
   - 删除人物及图集记录，图片变为散图
   - 删除人物及所有内容（全部进回收站）
@@ -425,7 +444,7 @@ ComfyUI（本地运行）
 
 **图集卡片（AlbumCard）：** 与 PersonCard 相同的正方形 + 渐变叠加样式，底部显示图集名 + "N张"，左上角评分徽章，右上角 hover 下拉菜单，支持 compact 模式
 
-**散图卡片（MediaCard）：** 正方形缩略图，底部渐变叠加（`from-black/70`）显示文件名（不含扩展名，`truncate` 截断），格式与 AlbumCard 一致。左上角评分徽章，右上角来源类型标签（AI / 截图），支持 compact 模式（隐藏文件名叠层和评分徽章）
+**散图卡片（MediaCard）：** 正方形缩略图，底部渐变叠加（`from-black/70`）显示文件名（不含扩展名，`truncate` 截断），格式与 AlbumCard 一致。左上角评分徽章，右上角来源类型标签（AI / 截图），支持 compact 模式（隐藏文件名叠层和评分徽章）。多选模式下：右上角显示圆形选中标记（`rounded-full`，选中时 `bg-primary`），隐藏评分徽章和来源标签
 
 **图集区筛选栏：** 排序（最新创建 / 评分最高 / 名称 A-Z）+ 评分筛选
 
@@ -439,23 +458,18 @@ ComfyUI（本地运行）
 - 随机探索（该人物范围，见 8.8 节）
 - 多选模式入口
 
-**图集卡片右键菜单：**
-- 重命名
-- 设为封面
-- 移动到其他人物 `[P1-后续]`
-- 为此图集应用换脸（批量换脸入口）
-- 清理低分生成图（见 8.7 节）`[P1-后续]`
-- 删除图集（弹窗二选一）：
-  - 仅删除图集，图片变为该人物散图
-  - 删除图集及所有内容（进回收站）
+**图集卡片右键菜单（AlbumCard 与图集详情页空白区域一致）：**
+- 重命名图集
+- 导入
+- 移动到其他人物（弹窗列出所有人物供选择，级联更新该图集下所有媒体的 person_id）
+- AI 功能 ▸ 批量换脸
+- ---
+- 删除图集（红色危险操作）
 
-**右键空白处触发规则（全局统一）：**
-- 图集详情页空白处 → 触发图集右键菜单（含清理低分生成图）
-- 人物主页空白处 → 触发人物层级上下文菜单（含清理低分生成图、批量清理低分图片）
-- 主页空白处 → 触发全局上下文菜单（含清理低分生成图）
-
-**人物主页上下文菜单额外操作：**
-- 批量清理低分图片：触发批量清理流程（见 §8.7），作用域限定为当前人物
+**右键空白处触发规则（菜单一致性原则）：**
+- 人物主页空白处 → 与人物卡片右键菜单一致
+- 图集详情页空白处 → 与图集卡片右键菜单一致
+- 主页空白处 → 新建人物、导入图片
 
 ### 5.4 图集详情页 `[P0]`
 
@@ -478,32 +492,40 @@ ComfyUI（本地运行）
 
 **视频卡片：** 显示第一帧缩略图（有截图封面时优先使用），右下角叠加播放三角图标，左键单击进入视频播放大图模式
 
-**图片卡片右键菜单（图片/生成图/视频截图，按分组排列）：**
-
-*管理操作组：*
-- 移动到图集（支持多选批量操作）
-- 设为图集封面
-- 设为人物封面
+**图片卡片右键菜单（MediaCard / AlbumDetail rowMenu / LightBox / TaskQueue 最近结果 / Workspace 保持一致）：**
+- 设为图集封面（有 albumId 时）
+- 设为人物封面（有 personId 时）
+- AI 功能 ▸（仅 image 类型，SubMenuItem 子菜单）
+  - 高清放大 `[P1]`
+  - 换脸 `[P1]`
+  - 局部修复 `[P1]`
 - 加入工作区
+- 移动到图集（支持多选批量操作）
 - 在文件管理器中显示
+- 评分 1-5
+- 查看详情（打开 MediaDetailDialog）
+- ---
+- 删除（进回收站，红色危险操作）
 
-*AI 操作组：*
-- 高清放大 `[P1]`
-- 换脸 `[P1]`
-- 局部带提示词修复 `[P1]`
-- 局部自动反推修复 `[P1]`
-
-*危险操作组（红色文字）：*
-- 删除（进回收站）
+**LightBox 右键菜单额外项：**
+- 生成链 / 脱离生成链
+- 视频时：静音/取消静音（替代 AI 功能子菜单）
 
 **生成图卡片右键菜单（额外项）：**
 - 脱离链接变为本地图（子数据：评分、二次生成图全部跟随）
 
+**MediaDetailDialog（媒体详情弹窗）：**
+- 通过右键菜单"查看详情"触发，所有带右键菜单的媒体页面均可打开
+- 显示内容：文件名、目录路径、格式（扩展名）、媒体类型（image/video）、来源类型（local/generated/screenshot）、分辨率（宽×高）、百万像素、文件大小、视频时长（仅视频）、工作流类型（仅生成图）、评分、创建时间
+
 **悬浮操作：** 卡片右上角 `…` 按钮，悬浮 0.5s 后显示
 
 **多选模式：**
-- PC：点击复选框（`[低优先级]` 鼠标框选）
+- PC：点击卡片或右上角圆形标记切换选中（`[低优先级]` 鼠标框选）
 - 手机：长按进入多选
+- 选中标记：卡片右上角圆形指示器（`rounded-full`），选中时填充主色 + 白色勾号，未选中时半透明边框
+- 底部工具栏（SelectionToolbar）：已选数量、全选/取消全选（自动切换）、移动到图集、加入工作区、评分、删除、取消
+- 等高行布局（RowImage）同样支持多选：点击切换选中、右上角圆形标记、选中时主色边框
 - 多选后支持：批量移动到图集、批量加入工作区、批量删除、批量分配人物
 
 ### 5.5 大图浏览模式 `[P0]`
@@ -518,7 +540,7 @@ ComfyUI（本地运行）
 ├──────────────────────────────┬──────────────────┤
 │                              │                  │
 │         主图展示区            │   右侧生成链面板  │
-│    （放大镜交互区域）          │                  │
+│    （放大交互区域）            │                  │
 │                              │                  │
 ├──────────────────────────────┴──────────────────┤
 │        底部图集预览条（仅本地图，动态滚动高亮）        │
@@ -533,7 +555,7 @@ ComfyUI（本地运行）
 - 动态滚动，当前图高亮居中
 - 点击缩略图直接跳转（跳过生成图层级，直接切换图集图）
 
-**右侧生成链面板（两种模式）：** `[P1-后续]` 当前为基础生成图列表，以下为完整规划。通过右键菜单"生成链"选项打开面板。
+**右侧生成链面板（两种模式）：** 通过右键菜单"生成链"选项打开面板，支持简略/详细切换按钮。
 
 *简略模式（默认）：*
 - 显示当前图在生成链中的位置（如"第 2 层 / 共 3 层"）
@@ -547,7 +569,7 @@ ComfyUI（本地运行）
 
 **当前图是生成图时：** 右侧面板在该生成图所在的本地图+生成图预览列表中滑动高亮显示
 
-**切换逻辑（主图区导航状态机）：** `[P1-后续]` 当前为扁平数组导航，以下为基于生成链的优先级遍历规划
+**切换逻辑（主图区导航状态机）：** 基于生成链的优先级遍历（已实现优先级 1-2，优先级 3-5 回退到扁平数组导航）
 
 当用户在主图区按 `→` 或右滑时，按以下优先级查找下一张（所有层级均受当前筛选条件约束）：
 
@@ -572,8 +594,20 @@ ComfyUI（本地运行）
 - 其他快捷键待细化
 
 **鼠标操作：**
-- 滚轮（主图区）：进入/调整放大镜模式倍数
-- 右键：退出放大镜模式
+- 单击主图：进入放大模式（以点击位置为中心放大到 2x，带动画）
+- 单击黑边区域：退出大图模式（不触发放大）
+- 单击（已放大时）：退出放大模式（动画回到 fit）
+- 双击主图：切换 fit ↔ 2x（带动画）
+- 滚轮（图片上）：以鼠标为中心缩放（1x ~ 8x）
+- 滚轮（黑边/缩略条）：切换上/下一张图片
+- 鼠标移动（已放大时）：图片跟随鼠标平移，鼠标在原图上的位置点与放大图对应位置重合；鼠标指针显示为放大镜图标；鼠标移出原图范围时隐藏放大图并恢复默认指针
+- 右键（已放大时）：退出放大模式
+
+**左右切换导航条（PC）：**
+- 左右边缘各显示一个全高导航长条（`w-28`），hover 时显示半透明背景（`bg-white/20`）和方向箭头图标
+- 鼠标指针替换为 SVG 方向箭头（CSS `cursor: url(data-uri)` 原生渲染）
+- 到达首张/末张时对应方向导航条不显示
+- 仅 PC 端显示，移动端使用滑动手势切换
 
 #### 5.5.1 沉浸模式（全屏浏览）
 
@@ -589,15 +623,26 @@ ComfyUI（本地运行）
 - PC：鼠标右键弹出菜单 → 选择"退出沉浸模式"；或按 `Esc`
 - 手机：两指同时触碰弹出菜单 → 选择"退出沉浸模式"（大图模式统一使用两指触碰替代长按弹菜单，避免与视频倍速手势冲突）
 
-#### 5.5.2 放大镜模式
+#### 5.5.2 放大模式
 
-- **触发：** 左键单击主图区进入放大镜模式
-- **行为：** 默认 2 倍放大，放大内容跟随指针移动，遮挡 UI（最高 z-index）
-- **渲染方式：** 读取原始高分辨率图片对应区域裁剪展示（非 CSS scale，保证清晰度）
-- **滚轮：** 调整放大倍数
-- **退出：** 右键退出放大镜模式
-- **超大图处理：** 不限制预览分辨率，完整加载原图以保证放大镜清晰度
-- **禁用时机：** 蒙版编辑器中禁用放大镜模式
+**PC 端（鼠标）：**
+- **触发：** 左键单击主图区 / 滚轮向上 / 双击
+- **行为：** 不再使用覆盖层，直接对主图 CSS transform 缩放，以触发点为中心放大
+- **缩放：** 滚轮在图片上以鼠标位置为中心缩放（1x ~ 8x），zoom factor = 1.15/tick
+- **平移：** 已放大状态下鼠标移动即平移图片，鼠标在原图上的位置点与放大图对应位置精确重合；鼠标指针替换为 SVG 放大镜图标（CSS `cursor: url(...)` 原生渲染）；鼠标移出原图范围时隐藏放大图并恢复默认指针；无边界约束
+- **双击：** 切换 fit ↔ 2x（带 0.3s 缓动动画）
+- **退出：** 单击 / 右键 / Esc 退出（动画回到 fit-to-screen）
+- **滚轮区域分离：** 黑边和缩略条区域滚轮切换图片，图片区域滚轮缩放
+- **性能：** CSS transform + will-change + rAF 直接 DOM 操作，60fps
+
+**移动端（触摸）：**
+- **触发：** 双指捏合（pinch-to-zoom）放大图片
+- **行为：** 图片以捏合中心为原点缩放（1x ~ 8x），支持双指平移
+- **单指拖拽：** 放大状态下单指可拖拽平移浏览
+- **退出：** 单击图片恢复原始大小；缩放接近 1x 时自动 snap 回原始尺寸
+- **仅图片：** 视频不支持放大模式
+
+**禁用时机：** 蒙版编辑器中禁用放大模式，改为画布整体缩放
 
 ### 5.6 视频大图模式 `[P0]`
 
@@ -651,19 +696,21 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - 截图作为子资产关联父视频（存储视频时间戳）
 - 首张截图自动成为视频封面，多张截图时可手动指定封面
 - 截图视为生成图，参与生成链管理
-- **截图后可选高清放大**：截图完成后显示 Toast 通知"截图已保存"，附带"高清放大"操作按钮。用户可点击按钮打开 UpscaleDrawer 面板进行放大，也可忽略 Toast 保留原图。不强制要求放大。
+- **截图后可选高清放大**：截图完成后显示 Toast 通知"截图已保存"，附带"高清放大"操作按钮。用户可点击按钮打开 WorkflowRunDialog（category=upscale）进行放大，也可忽略 Toast 保留原图。不强制要求放大。
 
 **视频封面：** 默认第 1 帧，有截图后使用第一张截图，可手动指定
 
 ### 5.7 蒙版编辑器（独立全屏页面） `[P1]`
 
-**触发：** 从图片右键菜单或大图模式顶部按钮触发"局部修复/重绘"
+**定位：** 纯遮罩绘制工具，不包含任务提交逻辑。由 WorkflowRunDialog 按需调用。
+
+**触发：** WorkflowRunDialog 中 inpaint 类工作流的 mask 参数点击"绘制遮罩"按钮
 
 **布局：**
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ [返回] [撤销] [重做] [清除全部]  画笔大小━━●━━  [橡皮擦] │ ← 顶部工具栏
+│ [返回] [画笔] [橡皮] [撤销] [重做] [清除]  画笔大小━━●━━  │ ← 顶部工具栏
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │              画布区域                            │
@@ -672,7 +719,7 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 │        （画笔绘制蒙版，橡皮擦擦除）                 │
 │                                                 │
 ├─────────────────────────────────────────────────┤
-│  [模式：Flux / SDXL / Klein▼]  提示词输入框(Flux时)  强度━━●(Klein无)  [立即执行] [加入队列] │
+│                                      [取消] [确认遮罩] │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -688,30 +735,11 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - 画笔大小：通过顶部滑块调节（手机端滑块加大触控区域）
 - 橡皮擦切换：顶部工具栏按钮（非长按手势，避免与绘制冲突）
 
-**底部提交区（三种模式并列选择）：**
-
-模式选择下拉框（三选一）：
-
-*Flux（带提示词修复）：*
-- 提示词输入框（支持中文）
-- 预设提示词快选 `[P2]`（用户可自定义保存预设）
-- 绘制强度滑块
-- 启用后位LoRA 复选框（默认关闭，开启后在 KSampler 前注入 Klein_9B 后位 LoRA，strength=1.0）
-- 立即执行 / 加入队列
-
-*SDXL（通用修复 A）：*
-- 无需提示词输入
-- 绘制强度滑块
-- 立即执行 / 加入队列
-
-*Klein（通用修复 B）：*
-- 无需提示词输入
-- 无强度参数
+**底部操作：** 取消 / 确认遮罩（返回 mask blob 给 WorkflowRunDialog，由 Dialog 负责上传和任务提交）
 - 立即执行 / 加入队列
 
 **返回逻辑：**
-- 未提交时点击返回：弹窗确认"是否放弃当前蒙版？" `[低优先级]`
-- 提交后：自动返回触发前的页面（大图模式或图集页）
+- 点击"取消"或"返回"关闭蒙版编辑器，返回 WorkflowRunDialog
 
 ### 5.8 任务队列页 `[P1]`
 
@@ -733,26 +761,28 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 
 **右键菜单（按状态动态显示）：**
 - **所有状态**：查看详情（弹出任务详情对话框）
-- **pending**：删除
-- **running**：仅查看详情
-- **completed**：查看结果（在 LightBox 中打开结果图）、删除
-- **failed/cancelled**：重试、删除
+- **pending**：取消、删除
+- **running**：取消
+- **completed**：重新执行、查看结果（在 LightBox 中打开结果图）、删除
+- **failed/cancelled**：重试（创建新任务，保留原任务历史）、删除
 
 **任务详情对话框：**
 - 显示任务类型、状态、创建/开始/完成时间、耗时
 - 参数列表（键值对），媒体 ID 参数解析为缩略图预览 + 路径
 - 错误信息（failed 时）
+- 输出参数（`result_outputs`，非图片输出如反推提示词等文本/数值结果）
 - 结果媒体列表（缩略图 + 路径）
 - 通过 `POST /api/media/by-ids` 批量获取关联媒体信息
 
 **最近完成结果视图：**
 - 位于"已完成"区域上方，可折叠展开
-- 收集最近 10 个已完成任务的 `result_media_ids`，批量获取 MediaItem
+- 收集最近 10 个已完成任务的 `result_media_ids`，按 `finished_at` 降序排列，批量获取 MediaItem
 - 网格展示缩略图（6列），点击进入 LightBox 大图模式
+- 右键菜单与图片卡片一致（AI 功能、加入工作区、移动到图集、资源管理器、评分、查看详情、删除）
 
 **任务操作：**
 - 拖拽调整队列顺序（仅对 `pending` 任务有效）：前端拖拽排序后调用 `PATCH /api/tasks/reorder` 批量更新 `queue_order`
-- 重新启动（适用于 `failed` 任务）
+- 重新启动（适用于 `failed`/`cancelled`/`completed` 任务，创建新任务而非重置原任务，保留历史记录）
 - 删除任务
 
 **任务失败处理：** 失败后自动跳过，继续执行下一个任务，任务标记为 `failed`，需手动重启
@@ -775,7 +805,7 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 
 **添加方式：** 任意图片卡片右键菜单"加入工作区"，或多选批量加入
 
-**工作区面板：** 展示已加入的图片缩略图网格，支持移除单张、拖拽排序（调用 `PATCH /api/workspace/reorder`）、一键清空
+**工作区面板：** 展示已加入的图片缩略图网格，点击图片进入 LightBox 大图浏览，右键菜单与图片卡片一致（AI 功能、加入工作区、移动到图集、资源管理器、评分、查看详情、删除），支持移除单张、拖拽排序（调用 `PATCH /api/workspace/reorder`）、一键清空
 
 **容量管理：** 达到 100 张上限时提示用户"工作区已满，请先移除部分图片"，新增操作被拒绝
 
@@ -832,6 +862,59 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - X / Twitter Cookie 或 API Key
 - Telegram 账号授权（Telethon）
 
+#### 5.11.1 工作流管理 Tab
+
+设置页顶部 Tab 切换：「通用设置」（现有内容）| 「工作流管理」。
+
+**工作流管理页内容**：
+- Category 过滤按钮栏（全部 / 换脸 / 局部重绘 / 高清放大 / 文生图 / 图生图 / 预处理）
+- 选择具体类别时显示该类别的参考卡片（功能说明、用法指引、参数约定表格），选「全部」时不显示卡片
+- 工作流卡片列表：名称、描述、⭐默认标记、[设为默认][删除] 按钮，点击卡片打开详情对话框
+- 工作流详情对话框：显示参数列表，允许编辑各参数的默认值并保存回工作流记录
+- [+ 导入工作流] 按钮 → 打开导入对话框
+
+**导入对话框三步流程**：
+1. **上传**：拖拽/选择 ComfyUI API JSON 文件 → 解析 `@` 前缀节点
+2. **配置**：填写名称/类别/描述，将 Category 契约参数映射到解析出的节点参数（必填参数未映射时禁用提交）。选择类别后自动匹配：节点的 `@` 标签名**包含**契约参数名即视为匹配（如 `@my_prompt` 匹配参数 `prompt`），无需完全相等。配置区下方为「自定义参数分配」区域（见下文）
+3. **提交**：注册工作流，重名时提示是否覆盖
+
+**导入进行中保护**：导入过程中，点击对话框外部或按 Escape 键不会关闭对话框，防止意外中断导入流程
+
+**`@` 前缀约定**：
+- 工作流 JSON 中 `_meta.title` 以 `@` 开头的节点才会被解析
+- `@` 标记的 LoadImage → 图片输入
+- `@` 标记的 SaveImage/PreviewImage/ImageAndMaskPreview 等图像输出类节点 → 输出节点（图像输出节点同时加入 `text_outputs` 供导入 UI 分配）
+- 其他 `@` 节点 → 进入「自定义参数分配」列表
+
+**选择性输出捕获**：只有在导入时被显式 `@` 标记并分配了角色的输出节点才会被捕获。图像输出存入 `result_outputs` 格式 `{"type": "image", "path": "..."}`
+
+**自定义参数分配（统一 UI）**：
+
+对每个未被契约映射消耗的 `@` 标记节点（非 LoadImage、非 SaveImage/PreviewImage），用户可为其分配角色：
+
+| 角色 | 说明 |
+|------|------|
+| 不使用 | 跳过该节点 |
+| 输入 | 作为额外输入参数 — 展开该节点的标量参数列表，每个参数可勾选/取消、编辑显示标签 |
+| 输出 | 作为输出捕获 — 展开输出标签编辑框，用于设置任务详情中的显示名称（ComfyUI 输出字段固定为 `text`） |
+| 输入+输出 | 同时作为输入参数和输出捕获 |
+
+- 若 Category 定义了 `outputs`（如 preprocess 的 caption），对应节点自动设为「输出」角色；其余默认「不使用」
+- 解析结果（解析摘要）区域默认折叠，点击可展开查看
+
+**Manifest 格式**：
+```json
+{
+  "mappings": { "param_name": { "node_id": "1", "key": "image", "type": "image" } },
+  "output_mappings": { "反推提示词": { "node_id": "15", "key": "text" } },
+  "extra_params": [
+    { "name": "prompt.text", "label": "text", "type": "string", "node_id": "10", "key": "text" }
+  ]
+}
+```
+- `output_mappings` 中外层 key 为显示标签（任务详情中展示），内层 `key` 固定为 ComfyUI 节点的输出字段名（通常为 `text`）
+- `extra_params` 中的 `name` 格式为 `节点名.参数键`，`label` 为用户可编辑的显示名称，`type` 为参数类型（string/int/float/bool）
+
 ---
 
 ## 6. 导入流程 `[P0]`
@@ -873,7 +956,8 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 ### 6.3 导入进度与取消
 
 - **进度显示：** 导入过程中显示进度条和计数（如"正在导入 45 / 230"）
-- **可取消：** 导入过程中可随时取消，已导入的记录保留（不回滚）
+- **可取消：** 导入过程中可随时取消（点击"取消导入"按钮），已导入的记录保留（不回滚）
+- **导入中保护：** 导入进行中时，点击对话框外部或按 Escape 键不会关闭对话框，防止意外中断
 - **大批量处理：** 超过 500 张图片时转为后台任务，顶部显示进度通知，用户可继续操作其他功能
 
 ### 6.4 人物上下文默认值
@@ -886,7 +970,7 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - 以文件绝对路径作为唯一标识去重
 - 重复扫描时跳过已存在记录，不重复导入
 
-### 6.6 文件丢失处理 `[P1-后续]` 前端丢失标记待实现
+### 6.6 文件丢失处理 `[P1]`
 
 - 系统检测到文件路径不可访问时，卡片显示丢失标记（红色虚线边框 + 警告图标）
 - 支持两种重定向方式：
@@ -905,9 +989,15 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 
 ### 7.1 通用规范
 
-- 所有 AI 功能通过底部抽屉式参数面板配置
-- 参数面板底部固定"立即执行"和"加入队列"两个按钮
-- 任务提交后，参数面板关闭，结果生成后自动存入 `AppData/generated/` 对应子目录
+- 所有 AI 功能通过 **WorkflowRunDialog**（居中弹窗）配置，替代旧的底部抽屉面板
+- **统一流程**：右键菜单 → AI 功能 → 选择类别（upscale / face_swap / inpaint） → WorkflowRunDialog 弹出 → 自动按 category 筛选已注册的工作流 → 动态渲染参数表单 → 提交任务
+- WorkflowRunDialog 布局：标题（category label）→ 源图预览 → 工作流选择器（默认选 `is_default` 的工作流）→ 参数表单 → 底部"加入队列"/"立即执行"按钮
+- 参数表单根据 category 契约参数 + manifest extra_params 动态渲染：
+  - `image` + name 为 `source_image`/`base_image` → 自动填入右键所选图片（只读）
+  - `image` + `source: "file_path"`（如 `mask`）→ 遮罩参数，显示"绘制遮罩"按钮，点击打开 MaskEditor，完成后回填 mask_path
+  - `image`（其他，如 `face_ref`）→ FaceRefPicker 选取
+  - `string` → textarea、`int`/`float` → number input、`bool` → checkbox
+- 任务提交后弹窗关闭，结果生成后自动存入 `AppData/generated/` 对应子目录
 - 生成结果作为生成图关联至来源图（人脸参考图为准）
 
 ### 7.2 高清放大 `[P1]`
@@ -916,53 +1006,34 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 
 **自动反推提示词：** 工作流内置 `llama_cpp_instruct_adv` + Qwen3-VL 反推节点，自动从输入图像生成正向提示词（Extreme Detailed 风格），无需用户手动输入
 
-**参数面板：**
-- 放大倍数（2x / 4x，具体选项按工作流能力确定）
-- 立即执行 / 加入队列
+**触发：** 右键 → AI 功能 → 高清放大 → WorkflowRunDialog 弹出（category=`upscale`），自动选中默认工作流，source_image 自动填入。参数由工作流 manifest 决定（如放大倍数、降噪强度等）
 
 **结果处理：** 存入 `generated/upscale/`，链接至原图
 
-### 7.3 局部修复 — Flux（带提示词） `[P1]`
+### 7.3 局部修复 `[P1]`
 
-**工作流：** `inpaint_flux` — 基于 Flux 的指定位置带提示词修复工作流
+**工作流：** `inpaint` 类别下可注册多个工作流（如 Flux、SDXL、Klein 等），用户在 WorkflowRunDialog 中选择
 
-**流程：** 触发 → 进入蒙版编辑器 → 选择 Flux 模式 → 绘制蒙版 → 配置参数 → 提交
+**流程：** 右键 → AI 功能 → 局部修复 → WorkflowRunDialog 弹出（category=`inpaint`） → 选择工作流 → 点击"绘制遮罩"按钮 → MaskEditor 全屏打开 → 绘制蒙版 → 确认 → 返回 Dialog → 配置其他参数（如提示词、降噪等，由工作流 manifest 决定） → 提交
 
-**参数：**
-- 提示词（中文，支持预设管理）
-- 绘制强度（denoise，默认 0.45）
-- 启用后位LoRA（可选，默认关闭）— 开启后动态注入 `LoraLoaderModelOnly` 节点，加载 `flux-2-kelin/Klein_9B-后位.safetensors`（strength=1.0），插入在 UNETLoader 与 KSampler 之间
+**MaskEditor**：纯遮罩绘制工具，不包含任务提交逻辑。完成后返回 mask blob 给 WorkflowRunDialog，由 Dialog 负责上传遮罩和提交任务
 
-**结果处理：** 存入 `generated/inpaint/`，链接至原图
-
-### 7.4 局部修复 — SDXL / Klein（通用） `[P1]`
-
-**工作流：** `inpaint_sdxl`（通用修复 A）/ `inpaint_klein`（通用修复 B）— 两个独立工作流，用户在蒙版编辑器模式下拉框中选择
-
-**流程：** 触发 → 进入蒙版编辑器 → 选择 SDXL 或 Klein 模式 → 绘制蒙版 → 配置参数 → 提交
-
-**参数：**
-- SDXL：绘制强度（无需提示词）
-- Klein：无参数（无提示词、无强度）
+**典型参数（由各工作流 manifest 定义）：**
+- Flux 工作流：提示词（中文）、绘制强度、启用后位LoRA
+- SDXL 工作流：绘制强度（无需提示词）
+- Klein 工作流：无参数（无提示词、无强度）
 
 **结果处理：** 存入 `generated/inpaint/`，链接至原图
 
-### 7.5 换脸 `[P1]`
+### 7.4 换脸 `[P1]`
 
-**工作流：** qwen edit 换脸工作流
+**工作流：** `face_swap` 类别下注册的工作流（如 qwen edit 换脸工作流）
 
 #### 单张换脸
 
-**流程：**
-1. 选中目标图（风格参考图）→ 触发"换脸"
-2. 弹窗弹出，显示底图预览（保留身体）和人脸参考区域
-3. 选择人脸参考图（支持三种选择路径）：
-   - 从工作区选取
-   - 按人物 → 图集 → 图片层级浏览选取（可跨人物）
-4. **交换按钮**：底图下方始终显示"交换"按钮（↕），无需等参考图选好即可点击。点击后底图移至人脸参考位、底图位置清空，用户可通过 picker 选择新底图；若两侧都有图则直接互换
-5. 立即执行 / 加入队列
+**流程：** 右键 → AI 功能 → 换脸 → WorkflowRunDialog 弹出（category=`face_swap`） → base_image 自动填入 → 通过 FaceRefPicker 选择 face_ref → 配置其他参数 → 提交
 
-**结果处理：** 存入 `generated/face_swap/`，**默认链接至人脸参考图**（非风格参考图），归属人脸参考图的人物。用户可在参数面板中更改归属人物。
+**结果处理：** 存入 `generated/face_swap/`，**默认链接至人脸参考图**（非风格参考图），归属人脸参考图的人物。
 
 #### 图集批量换脸
 
@@ -1050,10 +1121,10 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 ### 8.1 评分系统
 
 - 评分范围：1-5 星，可清除（清除后视为未评分）
-- **平均分计算规则：仅计算已评分媒体的平均值，未评分媒体不参与计算**
-- 全部未评分时，avg_rating 为 null，UI 显示"未评分"
+- **平均分计算规则：所有未删除图片参与计算，已评分媒体使用实际评分，未评分媒体按 2.5 分计入加权平均**
+- 全部媒体数为 0 时，avg_rating 为 null，UI 显示"未评分"
 - 前端显示格式：`★4.2 (12)` — 平均分 + 已评分数量
-- 图集和人物的平均评分实时计算（基于下属已评分媒体）
+- 图集和人物的平均评分实时计算（基于下属未删除图片的加权平均）
 - 评分入口：大图模式顶部、图片右键菜单、多选批量评分
 
 ### 8.2 筛选系统
@@ -1160,15 +1231,19 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 
 ### 9.2 多选交互
 
-- PC：鼠标右键框选 / 点击复选框
+- PC：点击卡片或右上角圆形标记切换选中（`[低优先级]` 鼠标框选）
 - 手机：长按进入多选模式
+- 选中视觉：卡片右上角圆形标记（选中填充主色 + 勾号），卡片边框变为主色 2px
+- 底部工具栏：全选/取消全选按钮根据当前选中状态自动切换文字和行为
+- Grid 布局（MediaCard）和等高行布局（RowImage）均支持多选
 - 多选支持的操作：移动到图集、批量加入工作区、批量删除、批量分配人物
 
-### 9.3 参数面板（底部抽屉）
+### 9.3 AI 参数面板（WorkflowRunDialog）
 
-- 从屏幕底部滑入
-- 手机端占满屏幕宽度，PC 端居中适当宽度
-- 固定底部按钮：立即执行 / 加入队列
+- 居中弹窗（Dialog），替代旧的底部抽屉式面板
+- 固定 Header（category 标题）+ 可滚动 Body（参数表单）+ 固定 Footer（加入队列 / 立即执行）
+- 根据 category 契约参数 + manifest extra_params 动态渲染表单
+- ComfyUI 未连接时"立即执行"按钮禁用
 
 ### 9.4 弹窗设计原则
 
@@ -1190,9 +1265,13 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - PWA 支持，可添加到手机桌面
 - 响应式布局断点：
   - `< 768px`：手机布局（单列，底部导航，全宽面板）
-  - `768px - 1279px`：平板/小屏 PC（双列网格，侧边导航收起）
-  - `1280px - 1919px`：标准 PC（多列网格，侧边导航可展开）
+  - `768px - 1279px`：平板/小屏 PC（双列网格，侧边导航固定展开）
+  - `1280px - 1919px`：标准 PC（多列网格，侧边导航固定展开）
   - `≥ 1920px`：大屏 PC / 4K（更多列，更大缩略图）
+
+**页面内容居中规范：**
+- 表单/列表型页面（Settings、Tools、TaskQueue、Workspace、RecycleBin）：页头栏和内容区使用 `max-w-2xl mx-auto` 居中，避免超宽屏下内容过度拉伸
+- 网格型页面（MediaLibrary、PersonHome、AlbumDetail）：页头和内容保持全宽，网格布局需要利用全部可用宽度
 
 **移动端页面头部/工具栏优化：**
 - 所有页面头部（MediaLibrary、PersonHome、AlbumDetail）移动端使用图标按钮（文字通过 `hidden sm:inline` 隐藏）
@@ -1220,7 +1299,7 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - 手机端导入使用 HTML file input 上传文件到服务器（`POST /api/media/upload-files`），无需 tkinter 文件选择器
 - 手机端主要场景：浏览、评分筛选、任务管理、文件导入
 - 手机端 AI 功能完整保留，但蒙版编辑精度有限
-- 放大镜模式仅 PC 端支持，手机端使用双指缩放替代
+- 放大模式：PC 端单击/滚轮/双击进入，CSS transform 缩放+拖拽平移；移动端双指捏合缩放+拖拽平移
 - **网格缩放**：所有卡片网格页面支持双指捏合缩放（移动端）和 Ctrl+滚轮缩放（桌面端），每次 ±1 列连续调整，范围 1-30 列
 - **缩放默认值**：设置页面可配置每个页面的默认列数，桌面端和手机端分别设置，支持任意正整数。每次切换页面时重置为默认值
 - **防误触**：双指缩放结束后 300ms 内抑制点击事件，防止误触发卡片导航
@@ -1233,9 +1312,9 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 | 快捷键 | 功能 |
 |--------|------|
 | `←` / `→` | 切换图片 |
-| `Esc` | 退出大图模式 |
+| `Esc` | 退出大图模式（依次退出：缩放 → 横屏 → 沉浸模式 → 关闭大图） |
 | `1`-`5` | 快速评分 |
-| 待扩展 | 其他快捷键后续补充 |
+| 浏览器返回键 / Android 返回手势 | 关闭大图模式（通过 `history.pushState` + `popstate` 拦截） |
 
 ---
 
@@ -1289,11 +1368,19 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - 访问文件时检测路径可用性，不可用时显示丢失标记
 - 剪贴板导入图片保存至 `AppData/imports/clipboard/`
 
-### 10.5 放大镜实现
+### 10.5 放大模式实现
 
-- 读取原始高分辨率图片，按指针位置裁剪对应区域渲染
-- 放大层使用最高 z-index，覆盖所有 UI 元素
-- 蒙版编辑器中禁用放大镜，改为画布整体缩放（滚轮缩放以指针为中心）
+- **架构**：提取为 `useImageZoom` hook（`frontend/src/hooks/useImageZoom.ts`），所有缩放状态存 ref，rAF 直接操作 img.style.transform，避免 React 重渲染
+- **渲染**：`transform: translate(tx, ty) scale(s)` + `transform-origin: 0 0` + `will-change: transform`，动画缩放加 `transition: transform 0.3s ease-out`，手势时 `transition: none`
+- **鼠标移动平移**：放大后鼠标移动即平移，公式：`nx = (mx - fitX) / fitW`（归一化坐标），`translateX = mx - nx * zoomW`，令鼠标在原图上的位置点与放大图对应位置重合；`nx/ny` 超出 `[0,1]` 时隐藏放大图（`opacity: 0`）并恢复默认指针
+- **放大镜指针**：放大模式下鼠标在图片范围内时，CSS `cursor: url("data:image/svg+xml,...")` 将原生指针替换为 SVG 放大镜图标（hotspot 居中），浏览器原生渲染零延迟
+- **无边界约束**：放大模式不使用 clamp，图片完全跟随鼠标位置映射
+- **滚轮分区**：hook 在图片容器上 `e.stopPropagation()` 拦截滚轮做缩放，外层 document 监听器只收到黑边/缩略条的滚轮做切图
+- **单击 vs 拖拽**：mousedown→mouseup 移动距离 < 5px 且时间 < 300ms = 单击
+- **黑边点击关闭**：`isPointOnImage()` 判断点击位置，黑边点击不 `stopPropagation`，冒泡到外层 `closeLightbox()`
+- **回调稳定性**：`onZoomChange` 存入 ref（`onZoomChangeRef`），避免外部传入不稳定回调导致 effect 链式重建
+- **移动端**：同一 hook 处理双指捏合缩放+单指拖拽平移，与 TouchArbiter 协调
+- 蒙版编辑器中禁用放大模式，改为画布整体缩放（滚轮缩放以指针为中心）
 
 ### 10.6 蒙版编辑器
 
@@ -1390,13 +1477,13 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 
 | 平台 | 技术方案 | 授权方式 |
 |------|----------|----------|
-| 小红书 | 需登录态，图片有防盗链 | 账号 Cookie |
+| 小红书 | Playwright 无头浏览器 | 无需授权 |
 | B站动态/专栏 | API 较开放 | 账号 Cookie（部分内容需要） |
 | X / Twitter | API 限制严格 | 账号 Cookie 或 API Key |
 | Telegram | 公开频道直接抓取，私有频道需授权 | Telethon 账号授权 |
 | 通用网页 | requests + Playwright 渲染动态页 | 无需授权 |
 
-**各平台授权配置：** 统一在设置页"平台授权"分区配置 Cookie / API Key / Telethon 授权
+**各平台授权配置：** 需要授权的平台在设置页"平台授权"分区配置 Cookie / API Key / Telethon 授权；小红书无需配置授权
 
 #### 11.2.1 触发方式
 
@@ -1412,7 +1499,7 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 1. **粘贴文本 → 提取链接**
    - 后端从原始文本中正则提取有效 URL
    - 识别平台类型
-   - 检查对应平台授权是否配置，未配置则提示前往设置
+   - 检查对应平台授权是否配置（小红书无需授权），未配置则提示前往设置
 
 2. **解析元数据**（后台请求，前端显示加载状态）
    - 博主用户名 / 显示名
@@ -1421,13 +1508,13 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
    - 图片/视频预览（缩略图列表）
    - 媒体数量
 
-3. **弹窗展示解析结果，用户确认**
+3. **页面内展示解析结果，用户确认**
 
 4. **账号关联步骤**
    - 检查该平台账号是否已有关联人物记录
    - **已关联**：自动带入关联人物，用户可更改
-   - **未关联**：询问关联到哪个人物（从已有人物选取 / 新建人物 / 暂不关联）
-   - 提供"记住此账号的关联关系"选项（勾选后写入 PlatformAccount 表）
+   - **未关联**：默认"新建人物"模式，人物名预填为博主显示名；可切换为"已有人物"或"暂不关联"
+   - 提供"记住此账号的关联关系"选项（默认勾选，写入 PlatformAccount 表）
 
 5. **图集配置**
    - 图集名称默认为帖子标题，可编辑
@@ -1457,6 +1544,20 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 - 查看所有已识别的平台账号列表
 - 编辑账号与人物的关联关系
 - 删除账号记录（不影响已下载的图片）
+
+### 11.3 AI 工具 Tab `[P4]`
+
+小工具页面新增「AI 工具」Tab，允许用户选择已注册的工作流并直接运行。
+
+- 工作流选择器（下拉，按 category 分组显示）
+- 显示工作流描述
+- 根据 manifest 的 `mappings` 动态渲染 Category 契约参数表单（image → 媒体 ID 输入，mask 类型 image → "绘制遮罩"按钮调用 MaskEditor，string → 文本框，int/float → 数字框）
+- 若 manifest 包含 `extra_params`，在契约参数下方以分隔线 + "额外参数" 标签显示额外参数表单：
+  - string → 多行文本框（textarea）
+  - bool → 复选框（checkbox）
+  - int / float → 数字输入框
+  - 默认值从 `workflow_json` 中对应节点的原始值提取
+- [运行] 按钮 → 创建 Task（immediate 模式）
 
 ---
 
@@ -1543,6 +1644,7 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 | PATCH | `/api/media/{id}` | 更新媒体信息（评分、移动图集等） |
 | PATCH | `/api/media/batch` | 批量更新（批量评分、批量移动） |
 | POST | `/api/media/{id}/detach` | 脱离生成链（清空 parent_media_id、workflow_type、generation_params） |
+| POST | `/api/media/check-files` | 批量检测文件是否存在（Body: ids，返回 missing 列表） |
 | DELETE | `/api/media/{id}` | 软删除 |
 
 ### 15.2 AI 任务
@@ -1552,7 +1654,8 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 | POST | `/api/tasks` | 创建任务（Body: workflow_type、params、execution_mode） |
 | GET | `/api/tasks` | 任务列表（支持 status 筛选） |
 | PATCH | `/api/tasks/{id}` | 更新任务（编辑参数、调整队列顺序） |
-| POST | `/api/tasks/{id}/retry` | 重试失败任务 |
+| POST | `/api/tasks/{id}/retry` | 重试任务（failed/cancelled/completed），创建新任务并返回新任务 ID |
+| POST | `/api/tasks/{id}/cancel` | 取消任务（pending/running → cancelled） |
 | PATCH | `/api/tasks/reorder` | 批量重排序待执行任务（Body: task_ids 有序列表） |
 | DELETE | `/api/tasks/{id}` | 删除任务 |
 | POST | `/api/queue/start` | 手动触发队列执行 |
@@ -1591,6 +1694,19 @@ seeking/swiping/speed_control → (touchend/pointerup) → idle
 | POST | `/api/download/confirm` | 确认下载（Body: 解析结果 + 人物/图集配置） |
 | GET | `/api/download/records` | 下载记录列表 |
 
+### 15.6 工作流管理 `[P4]`
+
+| Method | 端点 | 说明 |
+|--------|------|------|
+| GET | `/api/workflow-categories` | 返回 category 契约列表 |
+| POST | `/api/workflows/parse` | 解析 ComfyUI JSON，返回 @ 节点信息 |
+| GET | `/api/workflows` | 列出工作流（?category= 过滤） |
+| GET | `/api/workflows/:id` | 获取完整工作流详情 |
+| POST | `/api/workflows` | 注册新工作流（含 manifest 校验） |
+| PUT | `/api/workflows/:id` | 更新工作流 |
+| DELETE | `/api/workflows/:id` | 删除工作流 |
+| PATCH | `/api/workflows/:id/default` | 设为 category 默认 |
+
 ---
 
-*文档版本：v1.2 | 最后更新：2026-03-04*
+*文档版本：v1.5 | 最后更新：2026-03-07*

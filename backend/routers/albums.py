@@ -127,16 +127,29 @@ def create_album(body: AlbumCreate, db: Session = Depends(get_db)):
 @router.patch("/{aid}")
 def update_album(aid: str, body: AlbumUpdate, db: Session = Depends(get_db)):
     a = _album_or_404(aid, db)
+    old_person_id = a.person_id
     if body.name is not None:
         a.name = body.name
     if body.cover_media_id is not None:
         a.cover_media_id = body.cover_media_id
     if body.person_id is not None:
-        if not db.get(Person, body.person_id):
+        if body.person_id and not db.get(Person, body.person_id):
             raise HTTPException(status_code=404, detail="Person not found")
-        a.person_id = body.person_id
+        a.person_id = body.person_id or None
+        # Cascade: update all media in this album to new person_id
+        media_items = db.execute(
+            select(Media).where(Media.album_id == aid, Media.is_deleted == False)
+        ).scalars().all()
+        for m in media_items:
+            m.person_id = a.person_id
+    a.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(a)
+    # Recalc ratings for old and new person
+    if body.person_id is not None and old_person_id != a.person_id:
+        from routers.media import _recalc_person_rating
+        for pid in {old_person_id, a.person_id} - {None}:
+            _recalc_person_rating(pid, db)
     return _album_dict(a, db)
 
 

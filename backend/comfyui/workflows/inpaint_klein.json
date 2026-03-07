@@ -17,7 +17,7 @@
       "mask": ["2", 1],
       "grow": 0,
       "blur": 50,
-      "method": "gaussian"
+      "blur_type": "gaussian"
     }
   },
   "4": {
@@ -25,17 +25,37 @@
     "inputs": {
       "image": ["1", 0],
       "mask": ["3", 0],
-      "target_width": 1024,
-      "target_height": 1024,
-      "mask_expand": 32,
-      "preresize": false
+      "downscale_algorithm": "bilinear",
+      "upscale_algorithm": "bicubic",
+      "preresize": false,
+      "preresize_mode": "ensure minimum resolution",
+      "preresize_min_width": 1024,
+      "preresize_min_height": 1024,
+      "preresize_max_width": 16384,
+      "preresize_max_height": 16384,
+      "mask_fill_holes": true,
+      "mask_expand_pixels": 0,
+      "mask_invert": false,
+      "mask_blend_pixels": 32,
+      "mask_hipass_filter": 0.1,
+      "extend_for_outpainting": false,
+      "extend_up_factor": 1.0,
+      "extend_down_factor": 1.0,
+      "extend_left_factor": 1.0,
+      "extend_right_factor": 1.0,
+      "context_from_mask_extend_factor": 1.2,
+      "output_resize_to_target_size": true,
+      "output_target_width": 1024,
+      "output_target_height": 1024,
+      "output_padding": "32",
+      "device_mode": "gpu (much faster)"
     }
   },
   "5": {
     "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "F2K-9b-darkBeast_dbkBlitzV15_fp8.safetensors",
-      "weight_dtype": "fp8_e4m3fn"
+      "unet_name": "flux-2-klein\\F2K-9b-darkBeast_dbkBlitzV15_fp8.safetensors",
+      "weight_dtype": "default"
     }
   },
   "6": {
@@ -52,87 +72,91 @@
     }
   },
   "8": {
-    "class_type": "CLIPTextEncode",
+    "class_type": "WD14Tagger|pysssss",
     "inputs": {
-      "clip": ["6", 0],
-      "text": "将选中区域修复为自然真实的效果，与周围区域光线色调完全一致，边缘自然融合"
+      "image": ["4", 1],
+      "model": "wd-vit-tagger-v3",
+      "threshold": 0.35,
+      "character_threshold": 0.85,
+      "replace_underscore": false,
+      "trailing_comma": false,
+      "exclude_tags": ""
     }
   },
   "9": {
-    "class_type": "CLIPTextEncode",
+    "class_type": "CR Text Concatenate",
     "inputs": {
-      "clip": ["6", 0],
-      "text": ""
+      "text1": ["8", 0],
+      "text2": "",
+      "separator": ", "
     }
   },
   "10": {
-    "class_type": "ConditioningZeroOut",
+    "class_type": "CLIPTextEncode",
     "inputs": {
-      "conditioning": ["9", 0]
+      "clip": ["6", 0],
+      "text": ["9", 0]
     }
   },
   "11": {
-    "class_type": "VAEEncode",
+    "class_type": "ConditioningZeroOut",
     "inputs": {
-      "pixels": ["4", 0],
-      "vae": ["7", 0]
+      "conditioning": ["10", 0]
     }
   },
   "12": {
-    "class_type": "EmptyFlux2LatentImage",
+    "class_type": "InpaintModelConditioning",
     "inputs": {
-      "width": 1024,
-      "height": 1024,
-      "batch_size": 1
+      "positive": ["10", 0],
+      "negative": ["11", 0],
+      "vae": ["7", 0],
+      "pixels": ["4", 1],
+      "mask": ["4", 2],
+      "noise_mask": true
     }
   },
   "13": {
-    "class_type": "ReferenceLatent",
-    "inputs": {
-      "conditioning": ["8", 0],
-      "latent": ["11", 0]
-    }
-  },
-  "14": {
-    "class_type": "ReferenceLatent",
-    "inputs": {
-      "conditioning": ["10", 0],
-      "latent": ["11", 0]
-    }
-  },
-  "15": {
     "class_type": "KSampler",
     "inputs": {
       "model": ["5", 0],
-      "positive": ["13", 0],
-      "negative": ["14", 0],
-      "latent_image": ["12", 0],
+      "positive": ["12", 0],
+      "negative": ["12", 1],
+      "latent_image": ["12", 2],
       "seed": 42,
       "steps": 6,
-      "cfg": 1.0,
+      "cfg": 1,
       "sampler_name": "euler",
       "scheduler": "simple",
-      "denoise": 1.0
+      "denoise": 0.45
     }
   },
-  "16": {
+  "14": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["15", 0],
+      "samples": ["13", 0],
       "vae": ["7", 0]
     }
   },
-  "17": {
-    "class_type": "InpaintStitchImproved",
+  "15": {
+    "class_type": "ColorMatch",
     "inputs": {
-      "inpaint_crop_data": ["4", 2],
-      "image_crop": ["16", 0]
+      "image_ref": ["4", 1],
+      "image_target": ["14", 0],
+      "method": "mkl",
+      "strength": 1
     }
   },
-  "18": {
+  "16": {
+    "class_type": "InpaintStitchImproved",
+    "inputs": {
+      "stitcher": ["4", 0],
+      "inpainted_image": ["15", 0]
+    }
+  },
+  "17": {
     "class_type": "SaveImage",
     "inputs": {
-      "images": ["17", 0],
+      "images": ["16", 0],
       "filename_prefix": "generated/inpaint_klein"
     }
   }

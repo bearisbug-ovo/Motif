@@ -16,8 +16,8 @@
     "inputs": {
       "mask": ["2", 1],
       "grow": 0,
-      "blur": 50,
-      "method": "gaussian"
+      "blur": 60,
+      "blur_type": "gaussian"
     }
   },
   "4": {
@@ -25,16 +25,36 @@
     "inputs": {
       "image": ["1", 0],
       "mask": ["3", 0],
-      "target_width": 1024,
-      "target_height": 1024,
-      "mask_expand": 32,
-      "preresize": false
+      "downscale_algorithm": "bilinear",
+      "upscale_algorithm": "bicubic",
+      "preresize": false,
+      "preresize_mode": "ensure minimum resolution",
+      "preresize_min_width": 1024,
+      "preresize_min_height": 1024,
+      "preresize_max_width": 16384,
+      "preresize_max_height": 16384,
+      "mask_fill_holes": true,
+      "mask_expand_pixels": 0,
+      "mask_invert": false,
+      "mask_blend_pixels": 32,
+      "mask_hipass_filter": 0.1,
+      "extend_for_outpainting": false,
+      "extend_up_factor": 1.0,
+      "extend_down_factor": 1.0,
+      "extend_left_factor": 1.0,
+      "extend_right_factor": 1.0,
+      "context_from_mask_extend_factor": 1.2,
+      "output_resize_to_target_size": true,
+      "output_target_width": 1024,
+      "output_target_height": 1024,
+      "output_padding": "32",
+      "device_mode": "gpu (much faster)"
     }
   },
   "5": {
     "class_type": "WD14Tagger|pysssss",
     "inputs": {
-      "image": ["4", 0],
+      "image": ["4", 1],
       "model": "wd-vit-tagger-v3",
       "threshold": 0.35,
       "character_threshold": 0.85,
@@ -44,42 +64,57 @@
     }
   },
   "6": {
-    "class_type": "CheckpointLoaderSimple",
+    "class_type": "CR Prompt Text",
     "inputs": {
-      "ckpt_name": "XL-epicrealismXL.safetensors"
+      "prompt": "masterpiece, 4k, ray tracing, intricate details, highly-detailed, hyper-realistic, 8k RAW Editorial Photo, realistic, best quality, ultra-highres, clear details, detailed skin, skin textures, fair skin, \n"
     }
   },
   "7": {
-    "class_type": "CLIPTextEncode",
+    "class_type": "CR Text Concatenate",
     "inputs": {
-      "clip": ["6", 1],
-      "text": ["5", 0]
+      "text1": ["6", 0],
+      "text2": ["5", 0],
+      "separator": ""
     }
   },
   "8": {
-    "class_type": "CLIPTextEncode",
+    "class_type": "CheckpointLoaderSimple",
     "inputs": {
-      "clip": ["6", 1],
-      "text": ""
+      "ckpt_name": "XL-\u5199\u5b9e\\XL-epicrealismXL_vxviLastfameRealism.safetensors"
     }
   },
   "9": {
-    "class_type": "InpaintModelConditioning",
+    "class_type": "CLIPTextEncode",
     "inputs": {
-      "positive": ["7", 0],
-      "negative": ["8", 0],
-      "vae": ["6", 2],
-      "pixels": ["4", 0],
-      "mask": ["4", 1]
+      "clip": ["8", 1],
+      "text": ["7", 0]
     }
   },
   "10": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["8", 1],
+      "text": "score_6, score_5, score_4, low resolution, worst quality, low quality, normal quality, lowres, jpeg, cropped, bad composition, artifacts, bad proportions, error, inaccurate limb, bad anatomy, bad, ugly, terrible, extra fingers, fewer fingers, missing fingers, extra arms, extra legs, inaccurate eyes, extra digit, fewer digits, trademark, artist's name, username, watermark, signature, text, words, ribs, rib marks, visible ribs, abdominal muscles, skinny, muscular, thin"
+    }
+  },
+  "11": {
+    "class_type": "InpaintModelConditioning",
+    "inputs": {
+      "positive": ["9", 0],
+      "negative": ["10", 0],
+      "vae": ["8", 2],
+      "pixels": ["4", 1],
+      "mask": ["4", 2],
+      "noise_mask": true
+    }
+  },
+  "12": {
     "class_type": "KSampler",
     "inputs": {
-      "model": ["6", 0],
-      "positive": ["9", 0],
-      "negative": ["9", 1],
-      "latent_image": ["9", 2],
+      "model": ["8", 0],
+      "positive": ["11", 0],
+      "negative": ["11", 1],
+      "latent_image": ["11", 2],
       "seed": 42,
       "steps": 15,
       "cfg": 3.5,
@@ -88,33 +123,43 @@
       "denoise": 0.5
     }
   },
-  "11": {
+  "13": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["10", 0],
-      "vae": ["6", 2]
+      "samples": ["12", 0],
+      "vae": ["8", 2]
     }
   },
-  "12": {
+  "14": {
     "class_type": "ColorMatch",
     "inputs": {
-      "image_ref": ["4", 0],
-      "image_target": ["11", 0],
+      "image_ref": ["4", 1],
+      "image_target": ["13", 0],
       "method": "mkl",
       "strength": 1.0
     }
   },
-  "13": {
-    "class_type": "InpaintStitchImproved",
+  "15": {
+    "class_type": "ImageSmartSharpen+",
     "inputs": {
-      "inpaint_crop_data": ["4", 2],
-      "image_crop": ["12", 0]
+      "image": ["14", 0],
+      "noise_radius": 7,
+      "preserve_edges": 0.75,
+      "sharpen": 5,
+      "ratio": 0.5
     }
   },
-  "14": {
+  "16": {
+    "class_type": "InpaintStitchImproved",
+    "inputs": {
+      "stitcher": ["4", 0],
+      "inpainted_image": ["15", 0]
+    }
+  },
+  "17": {
     "class_type": "SaveImage",
     "inputs": {
-      "images": ["13", 0],
+      "images": ["16", 0],
       "filename_prefix": "generated/inpaint_sdxl"
     }
   }

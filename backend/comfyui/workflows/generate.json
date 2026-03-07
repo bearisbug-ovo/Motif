@@ -10,7 +10,7 @@
     "class_type": "LoraLoaderModelOnly",
     "inputs": {
       "model": ["1", 0],
-      "lora_name": "Zimage/ZiB-female解剖学_anatomy.safetensors",
+      "lora_name": "Zimage\\ZiB-female解剖学_anatomy.safetensors",
       "strength_model": 0.7
     }
   },

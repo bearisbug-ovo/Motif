@@ -1,8 +1,0 @@
-{
-  "base_image":        {"node_id": "1",  "key": "image"},
-  "face_ref_image":    {"node_id": "2",  "key": "image"},
-  "prompt":            {"node_id": "10", "key": "prompt"},
-  "seed":              {"node_id": "15", "key": "seed"},
-  "steps":             {"node_id": "15", "key": "steps"},
-  "filename_prefix":   {"node_id": "17", "key": "filename_prefix"}
-}

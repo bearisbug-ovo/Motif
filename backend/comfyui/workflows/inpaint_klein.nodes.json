@@ -1,7 +1,8 @@
 {
   "source_image":    {"node_id": "1",  "key": "image"},
   "mask_image":      {"node_id": "2",  "key": "image"},
-  "prompt":          {"node_id": "8",  "key": "text"},
-  "seed":            {"node_id": "15", "key": "seed"},
-  "filename_prefix": {"node_id": "18", "key": "filename_prefix"}
+  "prompt":          {"node_id": "9",  "key": "text2"},
+  "seed":            {"node_id": "13", "key": "seed"},
+  "denoise":         {"node_id": "13", "key": "denoise"},
+  "filename_prefix": {"node_id": "17", "key": "filename_prefix"}
 }

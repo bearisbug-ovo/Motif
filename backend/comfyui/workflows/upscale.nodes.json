@@ -3,7 +3,7 @@
   "unet_name":       {"node_id": "2",  "key": "unet_name"},
   "lora_name":       {"node_id": "3",  "key": "lora_name"},
   "lora_strength":   {"node_id": "3",  "key": "strength_model"},
-  "positive_prompt": {"node_id": "6",  "key": "text"},
+  "shift":           {"node_id": "4",  "key": "shift"},
   "seed":            {"node_id": "10", "key": "seed"},
   "upscale_by":      {"node_id": "10", "key": "upscale_by"},
   "steps":           {"node_id": "10", "key": "steps"},
@@ -11,6 +11,6 @@
   "denoise":         {"node_id": "10", "key": "denoise"},
   "tile_width":      {"node_id": "10", "key": "tile_width"},
   "tile_height":     {"node_id": "10", "key": "tile_height"},
-  "vae_name":        {"node_id": "4",  "key": "vae_name"},
+  "vae_name":        {"node_id": "5",  "key": "vae_name"},
   "filename_prefix": {"node_id": "11", "key": "filename_prefix"}
 }

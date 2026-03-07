@@ -1,29 +1,33 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, LayoutGrid, Rows3, Edit2, Trash2, FolderInput, FolderOpen, Shuffle, ZoomIn, Briefcase, Repeat, Paintbrush, ImageIcon, Star } from 'lucide-react'
+import { ArrowLeft, Download, LayoutGrid, Rows3, Edit2, Trash2, FolderInput, FolderOpen, Shuffle, Briefcase, ImageIcon, Star, ArrowRightLeft, Info } from 'lucide-react'
 import { useAlbumStore } from '@/stores/album'
 import { usePersonStore } from '@/stores/person'
-import { useMediaStore, setOnRatingChange } from '@/stores/media'
+import { useMediaStore, setOnRatingChange, setOnDelete } from '@/stores/media'
 import { MediaCard } from '@/components/MediaCard'
 import { FilterBar } from '@/components/FilterBar'
 import { LightBox } from '@/components/LightBox'
 import { ImportDialog } from '@/components/ImportDialog'
 import { MoveToAlbumDialog } from '@/components/MoveToAlbumDialog'
 import { SelectionToolbar } from '@/components/SelectionToolbar'
-import { UpscaleDrawer } from '@/components/UpscaleDrawer'
-import { FaceSwapDrawer } from '@/components/FaceSwapDrawer'
 import { BatchFaceSwapDialog } from '@/components/BatchFaceSwapDialog'
-import { MaskEditor } from '@/components/MaskEditor'
+import { WorkflowRunDialog } from '@/components/WorkflowRunDialog'
 import { StarRating } from '@/components/StarRating'
 import { ContextMenuPortal, MenuItem, MenuSeparator } from '@/components/ContextMenuPortal'
+import { MediaDetailDialog } from '@/components/MediaDetailDialog'
+import { AiAlbumSubMenu, AiMediaSubMenu } from '@/components/AiContextMenu'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { personsApi, Person as PersonItem } from '@/api/persons'
 import { mediaApi, MediaItem } from '@/api/media'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { useGridZoom } from '@/hooks/useGridZoom'
+import { useMissingFiles } from '@/hooks/useMissingFiles'
+import { useDevice } from '@/hooks/useDevice'
+import { EmptyState } from '@/components/Skeleton'
 
 const SORT_OPTIONS = [
   { value: 'sort_order', label: '默认顺序' },
@@ -34,11 +38,14 @@ const SORT_OPTIONS = [
 type LayoutMode = 'grid' | 'row'
 
 /** Row layout image — uses server dimensions for instant layout, falls back to onLoad */
-function RowImage({ item, onClick, onContextMenu, rowHeight = 200 }: {
+function RowImage({ item, onClick, onContextMenu, rowHeight = 200, selectable, selected, onToggleSelect }: {
   item: MediaItem
   onClick: () => void
   onContextMenu: (e: React.MouseEvent) => void
   rowHeight?: number
+  selectable?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }) {
   // Use server-provided dimensions if available, otherwise detect from loaded image
   const serverAspect = (item.width && item.height) ? item.width / item.height : 0
@@ -47,7 +54,10 @@ function RowImage({ item, onClick, onContextMenu, rowHeight = 200 }: {
 
   return (
     <div
-      className="cursor-pointer rounded-none sm:rounded-md overflow-hidden bg-card border border-border relative group"
+      className={cn(
+        'cursor-pointer rounded-none sm:rounded-md overflow-hidden bg-card border relative group',
+        selected ? 'border-primary border-2' : 'border-border',
+      )}
       style={{
         height: rowHeight,
         flexGrow: aspect,
@@ -55,7 +65,13 @@ function RowImage({ item, onClick, onContextMenu, rowHeight = 200 }: {
         flexBasis: `${rowHeight * aspect}px`,
         minWidth: 80,
       }}
-      onClick={onClick}
+      onClick={() => {
+        if (selectable && onToggleSelect) {
+          onToggleSelect(item.id)
+        } else {
+          onClick()
+        }
+      }}
       onContextMenu={onContextMenu}
     >
       <img
@@ -74,13 +90,13 @@ function RowImage({ item, onClick, onContextMenu, rowHeight = 200 }: {
         onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder.svg' }}
       />
       {/* Rating badge */}
-      {item.rating !== null && item.rating > 0 && (
+      {!selectable && item.rating !== null && item.rating > 0 && (
         <div className="absolute top-1.5 left-1.5 bg-black/60 rounded px-1.5 py-0.5">
           <span className="text-xs text-white font-medium">★{item.rating}</span>
         </div>
       )}
       {/* Source badge */}
-      {item.source_type !== 'local' && (
+      {!selectable && item.source_type !== 'local' && (
         <div className={cn(
           'absolute top-1.5 right-1.5 text-xs px-1.5 py-0.5 rounded',
           item.source_type === 'generated' ? 'bg-primary/80 text-white' : 'bg-blue-600/80 text-white'
@@ -96,6 +112,15 @@ function RowImage({ item, onClick, onContextMenu, rowHeight = 200 }: {
           </svg>
         </div>
       )}
+      {/* Select checkbox in multi-select mode */}
+      {selectable && (
+        <div className={cn(
+          'absolute top-1.5 right-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all z-10',
+          selected ? 'bg-primary border-primary' : 'border-white/60 bg-black/30',
+        )}>
+          {selected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+        </div>
+      )}
       {/* Hover overlay for consistency */}
       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
     </div>
@@ -106,7 +131,7 @@ export function AlbumDetail() {
   const { albumId } = useParams<{ albumId: string }>()
   const navigate = useNavigate()
   const { currentAlbum, fetchAlbum, updateAlbum, deleteAlbum } = useAlbumStore()
-  const { items, loading, sort, filterRating, sourceType, fetchByAlbum, openLightbox, setSort, setFilterRating, setSourceType, resetFilters, multiSelectMode, setMultiSelectMode, selectedIds, toggleSelection } = useMediaStore()
+  const { items, loading, sort, filterRating, sourceType, mediaType, fetchByAlbum, openLightbox, setSort, setFilterRating, setSourceType, setMediaType, resetFilters, multiSelectMode, setMultiSelectMode, selectedIds, toggleSelection } = useMediaStore()
   const [importOpen, setImportOpen] = useState(false)
   const [layout, setLayout] = useState<LayoutMode>('row')
   const [areaMenu, setAreaMenu] = useState<{ x: number; y: number } | null>(null)
@@ -114,14 +139,15 @@ export function AlbumDetail() {
   const [renameName, setRenameName] = useState('')
   const [moveTarget, setMoveTarget] = useState<string[]>([])
   const [moveOpen, setMoveOpen] = useState(false)
-  const [upscaleMedia, setUpscaleMedia] = useState<MediaItem | null>(null)
-  const [faceSwapMedia, setFaceSwapMedia] = useState<MediaItem | null>(null)
+  const [aiTarget, setAiTarget] = useState<{ category: string; media: MediaItem } | null>(null)
   const [batchFaceSwapOpen, setBatchFaceSwapOpen] = useState(false)
-  const [inpaintMedia, setInpaintMedia] = useState<MediaItem | null>(null)
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; item: MediaItem } | null>(null)
+  const [detailItem, setDetailItem] = useState<MediaItem | null>(null)
+  const [moveAlbumOpen, setMoveAlbumOpen] = useState(false)
+  const [moveAlbumPersons, setMoveAlbumPersons] = useState<PersonItem[]>([])
+  const [moveAlbumLoading, setMoveAlbumLoading] = useState(false)
 
-  // Detect mobile for force-grid
-  const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+  const { isMobile } = useDevice()
   const effectiveLayout = isMobile ? 'grid' : layout
 
   // Grid zoom for grid mode
@@ -129,6 +155,7 @@ export function AlbumDetail() {
   const compact = gridZoom.value >= (isMobile ? 4 : 10)
   // Row zoom for row mode (controls row height in px)
   const rowZoom = useGridZoom({ pageKey: 'album-row', min: 50, max: 500 })
+  const missingFiles = useMissingFiles(items)
 
   const handleShowInExplorer = useCallback((item: MediaItem) => {
     mediaApi.showInExplorer(item.id).catch(() => toast({ title: '无法打开', variant: 'destructive' }))
@@ -144,6 +171,25 @@ export function AlbumDetail() {
     fetchAlbum(albumId)
     fetchByAlbum(albumId)
   }, [albumId, fetchAlbum, fetchByAlbum])
+
+  const handleOpenMoveAlbum = async () => {
+    setMoveAlbumOpen(true)
+    try {
+      const list = await personsApi.list('name')
+      setMoveAlbumPersons(list.filter(p => p.id !== currentAlbum?.person_id))
+    } catch {}
+  }
+
+  const handleMoveAlbumToPerson = async (targetPersonId: string) => {
+    if (!albumId) return
+    setMoveAlbumLoading(true)
+    try {
+      await updateAlbum(albumId, { person_id: targetPersonId })
+      setMoveAlbumOpen(false)
+      handleRefresh()
+    } catch {}
+    setMoveAlbumLoading(false)
+  }
 
   // Fisher-Yates shuffle
   const shuffleArray = <T,>(arr: T[]): T[] => {
@@ -173,6 +219,11 @@ export function AlbumDetail() {
 
   useEffect(() => {
     if (!albumId) return
+    // Only clear items when switching to a DIFFERENT album (not on re-entry/refresh)
+    const { currentAlbum } = useAlbumStore.getState()
+    if (!currentAlbum || currentAlbum.id !== albumId) {
+      useMediaStore.setState({ items: [], loading: true })
+    }
     resetFilters('album-detail')
     fetchAlbum(albumId)
     fetchByAlbum(albumId)
@@ -182,6 +233,13 @@ export function AlbumDetail() {
     setOnRatingChange(handleRefresh)
     return () => setOnRatingChange(null)
   }, [handleRefresh])
+
+  useEffect(() => {
+    setOnDelete(() => {
+      if (albumId) fetchAlbum(albumId)
+    })
+    return () => setOnDelete(null)
+  }, [albumId, fetchAlbum])
 
   const openLB = (m: MediaItem) => {
     const idx = items.findIndex((x) => x.id === m.id)
@@ -204,7 +262,7 @@ export function AlbumDetail() {
         <div className="flex-1 min-w-0">
           <h1 className="text-sm sm:text-base font-semibold truncate">{currentAlbum?.name || '...'}</h1>
           {currentAlbum && (
-            <p className="text-[10px] sm:text-xs text-muted-foreground">{currentAlbum.media_count} 张</p>
+            <p className="text-xs text-muted-foreground">{currentAlbum.media_count} 张</p>
           )}
         </div>
         {currentAlbum?.avg_rating !== null && currentAlbum?.avg_rating !== undefined && (
@@ -251,6 +309,8 @@ export function AlbumDetail() {
           onRatingFilterChange={(v) => { setFilterRating(v || undefined); if (albumId) fetchByAlbum(albumId) }}
           sourceType={sourceType}
           onSourceTypeChange={(v) => { setSourceType(v || undefined); if (albumId) fetchByAlbum(albumId) }}
+          mediaType={mediaType}
+          onMediaTypeChange={(v) => { setMediaType(v || undefined); if (albumId) fetchByAlbum(albumId) }}
         />
       </div>
 
@@ -264,25 +324,27 @@ export function AlbumDetail() {
           setAreaMenu({ x: e.clientX, y: e.clientY })
         }}
       >
-        {loading ? (
-          <div className="flex items-center justify-center h-64 text-muted-foreground">加载中...</div>
-        ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 gap-4 text-muted-foreground">
-            <p>图集中还没有图片</p>
-            <Button variant="outline" onClick={() => setImportOpen(true)}>
-              <Download className="w-4 h-4 mr-1.5" />
-              导入图片
-            </Button>
-          </div>
+        {items.length === 0 && !loading ? (
+          <EmptyState
+            icon={ImageIcon}
+            title="图集中还没有图片"
+            description="导入本地图片或从其他图集移动"
+            action={
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <Download className="w-4 h-4 mr-1.5" />
+                导入图片
+              </Button>
+            }
+          />
         ) : effectiveLayout === 'grid' ? (
           /* Square grid mode */
           <div style={gridZoom.gridStyle}>
-            {items.map((m) => (
+            {items.map((m, i) => (
               <MediaCard
                 key={m.id}
                 item={m}
                 showRating={false}
-                compact={compact}
+                compact
                 albumId={albumId}
                 personId={currentAlbum?.person_id || undefined}
                 onCoverSet={handleRefresh}
@@ -290,16 +352,10 @@ export function AlbumDetail() {
                 selectable={multiSelectMode}
                 selected={selectedIds.has(m.id)}
                 onToggleSelect={toggleSelection}
+                animIndex={i}
+                missingFile={missingFiles.has(m.id)}
                 extraMenuItems={<>
-                  {m.media_type === 'image' && (
-                    <MenuItem icon={<ZoomIn className="w-3.5 h-3.5" />} label="高清放大" onClick={() => setUpscaleMedia(m)} />
-                  )}
-                  {m.media_type === 'image' && (
-                    <MenuItem icon={<Repeat className="w-3.5 h-3.5" />} label="换脸" onClick={() => setFaceSwapMedia(m)} />
-                  )}
-                  {m.media_type === 'image' && (
-                    <MenuItem icon={<Paintbrush className="w-3.5 h-3.5" />} label="局部修复" onClick={() => setInpaintMedia(m)} />
-                  )}
+                  <AiMediaSubMenu item={m} onAction={(cat) => setAiTarget({ category: cat, media: m })} />
                   <MenuItem icon={<Briefcase className="w-3.5 h-3.5" />} label="加入工作区" onClick={async () => {
                     try { await useWorkspaceStore.getState().addItem(m.id); toast({ title: '已加入工作区' }) }
                     catch (err: any) { toast({ title: err.message || '添加失败', variant: 'destructive' }) }
@@ -314,11 +370,15 @@ export function AlbumDetail() {
           /* Equal-height row mode — images fill rows with varying widths based on aspect ratio */
           <div className="flex flex-wrap gap-1.5" style={{ alignContent: 'flex-start' }}>
             {items.map((m) => (
-              <RowImage key={m.id} item={m} rowHeight={rowZoom.value} onClick={() => openLB(m)} onContextMenu={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                setRowMenu({ x: e.clientX, y: e.clientY, item: m })
-              }} />
+              <RowImage key={m.id} item={m} rowHeight={rowZoom.value} onClick={() => openLB(m)}
+                selectable={multiSelectMode}
+                selected={selectedIds.has(m.id)}
+                onToggleSelect={toggleSelection}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setRowMenu({ x: e.clientX, y: e.clientY, item: m })
+                }} />
             ))}
             {/* Invisible spacers to prevent last row from over-stretching */}
             {Array.from({ length: 6 }).map((_, i) => (
@@ -337,7 +397,8 @@ export function AlbumDetail() {
             setRenameOpen(true)
           }} />
           <MenuItem icon={<Download className="w-3.5 h-3.5" />} label="导入" onClick={() => { setAreaMenu(null); setImportOpen(true) }} />
-          <MenuItem icon={<Repeat className="w-3.5 h-3.5" />} label="批量换脸" onClick={() => { setAreaMenu(null); setBatchFaceSwapOpen(true) }} />
+          <MenuItem icon={<ArrowRightLeft className="w-3.5 h-3.5" />} label="移动到其他人物" onClick={() => { setAreaMenu(null); handleOpenMoveAlbum() }} />
+          <AiAlbumSubMenu onBatchFaceSwap={() => { setAreaMenu(null); setBatchFaceSwapOpen(true) }} />
           <MenuSeparator />
           <MenuItem icon={<Trash2 className="w-3.5 h-3.5" />} label="删除图集" onClick={async () => {
             setAreaMenu(null)
@@ -372,15 +433,7 @@ export function AlbumDetail() {
               } catch { toast({ title: '设置封面失败', variant: 'destructive' }) }
             }} />
           )}
-          {rowMenu.item.media_type === 'image' && (
-            <MenuItem icon={<ZoomIn className="w-3.5 h-3.5" />} label="高清放大" onClick={() => { setUpscaleMedia(rowMenu.item); setRowMenu(null) }} />
-          )}
-          {rowMenu.item.media_type === 'image' && (
-            <MenuItem icon={<Repeat className="w-3.5 h-3.5" />} label="换脸" onClick={() => { setFaceSwapMedia(rowMenu.item); setRowMenu(null) }} />
-          )}
-          {rowMenu.item.media_type === 'image' && (
-            <MenuItem icon={<Paintbrush className="w-3.5 h-3.5" />} label="局部修复" onClick={() => { setInpaintMedia(rowMenu.item); setRowMenu(null) }} />
-          )}
+          <AiMediaSubMenu item={rowMenu.item} onAction={(cat) => { setAiTarget({ category: cat, media: rowMenu.item }); setRowMenu(null) }} />
           <MenuItem icon={<Briefcase className="w-3.5 h-3.5" />} label="加入工作区" onClick={async () => {
             setRowMenu(null)
             try { await useWorkspaceStore.getState().addItem(rowMenu.item.id); toast({ title: '已加入工作区' }) }
@@ -409,6 +462,7 @@ export function AlbumDetail() {
             ))}
           </div>
           <MenuSeparator />
+          <MenuItem icon={<Info className="w-3.5 h-3.5" />} label="查看详情" onClick={() => { setDetailItem(rowMenu.item); setRowMenu(null) }} />
           <MenuItem icon={<Trash2 className="w-3.5 h-3.5" />} label="删除" onClick={async () => {
             setRowMenu(null)
             if (confirm('确定要删除这张图片吗？')) {
@@ -417,6 +471,8 @@ export function AlbumDetail() {
           }} destructive />
         </ContextMenuPortal>
       )}
+
+      <MediaDetailDialog open={!!detailItem} onOpenChange={(o) => { if (!o) setDetailItem(null) }} item={detailItem} />
 
       {/* Rename album dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
@@ -449,7 +505,30 @@ export function AlbumDetail() {
         </DialogContent>
       </Dialog>
 
-      <LightBox onShowInExplorer={handleShowInExplorer} onMoveToAlbum={handleMoveToAlbum} onUpscale={(m) => setUpscaleMedia(m)} onFaceSwap={(m) => setFaceSwapMedia(m)} onInpaint={(m) => setInpaintMedia(m)} onScreenshotUpscale={(m) => setUpscaleMedia(m)} />
+      {/* Move album to person dialog */}
+      <Dialog open={moveAlbumOpen} onOpenChange={setMoveAlbumOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>移动到其他人物</DialogTitle></DialogHeader>
+          <div className="max-h-64 overflow-auto space-y-1">
+            {moveAlbumPersons.length === 0 && <p className="text-sm text-muted-foreground py-4 text-center">没有其他人物</p>}
+            {moveAlbumPersons.map(p => (
+              <button
+                key={p.id}
+                className="w-full flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-muted text-left transition-colors"
+                onClick={() => handleMoveAlbumToPerson(p.id)}
+                disabled={moveAlbumLoading}
+              >
+                <div className="w-8 h-8 rounded-full bg-muted overflow-hidden shrink-0">
+                  {p.cover_file_path && <img src={mediaApi.thumbUrl(p.cover_file_path, 100)} alt="" className="w-full h-full object-cover" />}
+                </div>
+                <span className="text-sm truncate">{p.name}</span>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <LightBox onShowInExplorer={handleShowInExplorer} onMoveToAlbum={handleMoveToAlbum} onAiAction={(cat, m) => setAiTarget({ category: cat, media: m })} />
       <MoveToAlbumDialog
         open={moveOpen}
         onOpenChange={setMoveOpen}
@@ -469,15 +548,11 @@ export function AlbumDetail() {
         onMoveToAlbum={(ids) => { setMoveTarget(ids); setMoveOpen(true) }}
         onRefresh={handleRefresh}
       />
-      <UpscaleDrawer
-        open={!!upscaleMedia}
-        onOpenChange={(v) => { if (!v) setUpscaleMedia(null) }}
-        media={upscaleMedia}
-      />
-      <FaceSwapDrawer
-        open={!!faceSwapMedia}
-        onOpenChange={(v) => { if (!v) setFaceSwapMedia(null) }}
-        media={faceSwapMedia}
+      <WorkflowRunDialog
+        open={!!aiTarget}
+        onOpenChange={(v) => { if (!v) setAiTarget(null) }}
+        category={aiTarget?.category || ''}
+        sourceMedia={aiTarget?.media || null}
       />
       <BatchFaceSwapDialog
         open={batchFaceSwapOpen}
@@ -487,11 +562,6 @@ export function AlbumDetail() {
         personId={currentAlbum?.person_id || undefined}
         imageCount={items.filter(m => m.media_type === 'image').length}
         onComplete={handleRefresh}
-      />
-      <MaskEditor
-        open={!!inpaintMedia}
-        onClose={() => setInpaintMedia(null)}
-        media={inpaintMedia}
       />
     </div>
   )

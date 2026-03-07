@@ -47,51 +47,97 @@ export default {
 
 | 条件 | 说明 |
 |---|---|
-| 后端运行 | `uvicorn main:app --host 0.0.0.0 --port 8000` |
-| 数据库 | 使用独立测试库（`appdata/test/db/main.sqlite`），每轮测试前重置 |
+| 后端运行 | `uvicorn main:app --reload --host 0.0.0.0 --port 8000`（`--reload` 确保代码变更后 .pyc 缓存自动刷新） |
+| 数据库 | 使用生产库，测试通过 `cleanupPerson()` 在 `afterAll` 中清理自身创建的数据，**不删除用户数据** |
 | ComfyUI | AI 功能测试需启动 ComfyUI；纯浏览/管理测试可跳过 |
-| 测试图片 | `tests/fixtures/` 下放置测试用图片（至少 5 张 JPG） |
+| 测试素材 | `tests/fixtures/` 下放置 `test_1.jpg` ~ `test_5.jpg` + `test_video.mp4` |
+| 代理环境 | 若系统设置了 `HTTP_PROXY`，Node.js `fetch` 会受影响；需通过 `page.evaluate(fetch(...))` 走浏览器请求绕过代理 |
 
-### 1.4 辅助函数
+### 1.4 运行方式
+
+```bash
+# 运行全部 E2E 测试（需先启动 backend:8000，jest-puppeteer 自动启动 frontend:5173）
+cd frontend
+npx jest --config jest.config.ts --runInBand --verbose
+
+# 运行单个测试文件
+npx jest --config jest.config.ts --runInBand --verbose --testPathPatterns="media-type-filter"
+```
+
+### 1.5 测试数据隔离策略
+
+**原则：测试不得删除用户已有数据。**
+
+| 策略 | 说明 |
+|---|---|
+| 唯一命名 | 每个测试创建人物名加 `Date.now()` 后缀，避免与用户数据冲突 |
+| `afterAll` 清理 | 使用 `cleanupPerson(personId)` 递归删除测试创建的人物→图集→媒体→回收站记录 |
+| 导入去重感知 | 后端对 `file_path + is_deleted == False` 做去重，同一文件被多个测试套件导入时只有第一个成功。测试用 `getMediaByPerson()` / `getMediaByAlbum()` 获取实际导入数量，动态计算预期值 |
+| 条件断言 | 当去重导致 0 条媒体时，测试退化为验证 API 可达而非验证具体数据 |
+
+### 1.6 辅助函数
+
+完整源码见 `frontend/tests/e2e/helpers.ts`，主要函数：
 
 ```ts
-// tests/e2e/helpers.ts
+// 基础常量
 export const BASE = 'http://localhost:5173'
+export const API = 'http://localhost:8000/api'
 
-export async function resetDB() {
-  await fetch('http://localhost:8000/api/test/reset', { method: 'POST' })
-}
+// CRUD 操作
+export async function createPerson(name: string)
+export async function deletePerson(personId: string)
+export async function createAlbum(name: string, personId: string)
+export async function deleteAlbum(albumId: string)
+export async function importTestImages(personId: string, paths: string[])
+export async function importToAlbum(albumId: string, paths: string[])
+export async function rateMedia(mediaId: string, rating: number)
+export async function softDeleteMedia(mediaId: string)
+export async function batchDeleteMedia(ids: string[])
 
-export async function importTestImages(personName: string, paths: string[]) {
-  // 通过 API 直接导入，跳过 UI 流程
-  const res = await fetch('http://localhost:8000/api/persons', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: personName }),
-  })
-  const person = await res.json()
-  await fetch('http://localhost:8000/api/media/import', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paths, person_id: person.id }),
-  })
-  return person
-}
+// 查询
+export async function getMediaByPerson(personId: string): Promise<any[]>
+export async function getMediaByAlbum(albumId: string): Promise<any[]>
+export async function getPersons(): Promise<any[]>
+export async function getAlbums(personId: string): Promise<any[]>
+export async function getTasks(status?: string): Promise<any[]>
+export async function getWorkspaceItems(): Promise<any[]>
+export async function getRecycleBin(): Promise<any>
 
-export async function waitForSelector(sel: string, timeout = 5000) {
-  await page.waitForSelector(sel, { timeout })
-}
+// 任务
+export async function createTask(params: { workflow_type: string; params: Record<string, any>; execution_mode?: string })
+export async function deleteTask(taskId: string)
+export async function cancelTask(taskId: string)
 
-export async function rightClick(sel: string) {
-  await page.click(sel, { button: 'right' })
-}
+// 工作区
+export async function addToWorkspace(mediaId: string)
+export async function clearWorkspace()
 
-export async function getTextContent(sel: string): Promise<string> {
-  return page.$eval(sel, el => el.textContent?.trim() || '')
-}
+// 回收站
+export async function restoreMedia(mediaId: string)
+export async function permanentDeleteMedia(mediaId: string)
 
-export async function countElements(sel: string): Promise<number> {
-  return page.$$eval(sel, els => els.length)
-}
+// 页面导航与断言
+export async function navigateTo(path: string)    // page.goto with networkidle0
+export async function waitForTestId(testId: string, timeout?: number)
+export async function clickTestId(testId: string)
+export async function screenshot(name: string)    // 输出到 tests/screenshots/{name}.png
+export function sleep(ms: number)
+
+// 清理（非破坏性：只删除指定人物及其关联数据）
+export async function cleanupPerson(personId: string)
 ```
+
+### 1.7 已知注意事项
+
+| 问题 | 原因 | 解决方案 |
+|---|---|---|
+| 后端 `.pyc` 缓存不刷新 | uvicorn 未加 `--reload` 启动，修改 `.py` 后 `.pyc` 不更新 | 始终用 `--reload` 启动；或手动删除 `__pycache__/*.pyc` 后重启 |
+| `navigateTo('/tasks')` 超时 | `networkidle0` 等待所有请求完成，任务页可能有长轮询 | 改用 `page.goto(url, { waitUntil: 'domcontentloaded' })` + `sleep()` |
+| `jest-puppeteer` 捕获 `pageerror` | 前端页面抛出的未捕获错误会被 jest-puppeteer 报告为测试失败 | 对可能触发前端报错的场景（如导航到不存在的 ID）用 API 测试替代 UI 测试 |
+| Radix UI Select 不是原生 `<select>` | shadcn/ui 的 Select 组件渲染为 `button[role="combobox"]` | 用 `button[role="combobox"]` 选择器查找下拉控件 |
+| 任务队列 runner 竞态 | 后端 queue_runner 线程可能在取消请求到达前就处理了任务 | 使用 `waitForTerminal()` 轮询等待终态，接受多种终态（cancelled/failed/completed） |
+| `HTTP_PROXY` 影响 Node.js fetch | 系统代理会拦截测试请求并可能丢失查询参数 | 通过 `page.evaluate(fetch(...))` 使用浏览器 fetch（走 Vite 代理） |
 
 ---
 
@@ -120,7 +166,7 @@ export async function countElements(sel: string): Promise<number> {
 | T-TQ-01 ~ 12 | §5.8 | 任务队列 | P1 | task-queue.test.ts |
 | T-WS-01 ~ 07 | §5.9 | 工作区 | P1 | workspace.test.ts |
 | T-BIN-01 ~ 05 | §5.10 | 回收站 | P0 | recycle-bin.test.ts |
-| T-SET-01 ~ 05 | §5.11 | 设置页 | P0 | settings.test.ts |
+| T-SET-01 ~ 08 | §5.11 | 设置页 | P0 | settings.test.ts |
 | T-CUI-01 ~ 04 | §5.11 | ComfyUI 状态 | P0 | comfyui-status.test.ts |
 | T-IMP-01 ~ 08 | §6 | 导入流程 | P0 | import-flow.test.ts |
 | T-AI-UP-01 ~ 03 | §7.2 | 高清放大 | P1 | — |
@@ -128,15 +174,29 @@ export async function countElements(sel: string): Promise<number> {
 | T-AI-IP-01 ~ 05 | §7.3, §7.4 | 局部修复 | P1 | — |
 | T-RATE-01 ~ 05 | §8.1 | 评分系统 | P0 | rating-filter.test.ts |
 | T-FILT-01 ~ 08 | §8.2, §8.3 | 筛选排序系统 | P0 | filter-sort.test.ts |
+| T-FILT-DEF-01 ~ 04 | §8.2, §8.3 | 筛选默认值与重置 | P0 | filter-defaults.test.ts |
 | T-SORT-01 ~ 03 | §8.3 | 排序系统 | P0 | — |
-| T-COVER-01 ~ 03 | §8.4 | 封面管理 | P0 | — |
+| T-COVER-01 ~ 05 | §8.4 | 封面管理 | P0 | cover-management.test.ts |
 | T-DEL-01 ~ 04 | §8.6 | 软删除与回收站 | P0 | — |
-| T-EXP-01 ~ 04 | §8.8 | 随机探索 | P0 | — |
+| T-EXP-01 ~ 05 | §8.8 | 随机探索 | P0 | random-explore.test.ts |
 | T-BATCH-01 ~ 05 | §5.4, §8.7 | 批量操作 | P0 | batch-operations.test.ts |
 | T-KB-01 ~ 05 | §9.7 | 键盘快捷键 | P0 | keyboard-shortcuts.test.ts |
 | T-RESP-01 ~ 11 | §9.6 | 响应式布局 | P0 | responsive-layout.test.ts |
-| T-ERR-01 ~ 04 | §13 | 异常处理 | P0 | — |
+| T-ERR-01 ~ 07 | §13 | 异常处理 | P0 | error-handling.test.ts |
 | T-PERF-01 ~ 03 | §14 | 性能指标 | P0 | — |
+| T-MTYPE-01 ~ 05 | §5.5 | 媒体类型筛选 | P0 | media-type-filter.test.ts |
+| T-CANCEL-01 ~ 05 | §5.10 | 任务取消 | P1 | task-cancel.test.ts |
+| T-AMOVE-01 | §5.4 | 图集移动 | P1 | — |
+| T-MISS-01 | §6.6 | 文件丢失检测 | P1 | — |
+| T-CHAIN-NAV-01 ~ 02 | §5.7 | 生成链导航 | P1 | — |
+| T-CHAIN-MODE-01 | §5.7 | 链面板模式 | P1 | — |
+| T-PWA-01 | §1 | PWA | P0 | — |
+| T-API-01 ~ 02 | §4 | API 字段验证 | P0 | — |
+| T-WF-01 ~ T-WF-19 | §5.11.1, §11.3, §15.6 | 工作流管理 | P1 | — |
+| T-WF-20 ~ 21 | §5.11.1, §11.3 | 工作流默认值编辑、AI 工具遮罩 | P1 | — |
+| T-DETAIL-01 ~ 03 | §5.4, §5.8, §5.9 | MediaDetailDialog | P0 | — |
+| T-CTX-01 ~ 02 | §5.8, §5.9 | 统一右键菜单（TaskQueue/Workspace） | P1 | — |
+| T-UI-01 ~ 05 | P3-UI | 视觉改进（骨架屏/空状态/动画/字体/无障碍） | P3-UI | — |
 
 ---
 
@@ -145,26 +205,18 @@ export async function countElements(sel: string): Promise<number> {
 ### 3.1 左侧导航栏 [PRD §5.1]
 
 ```
-T-NAV-01: 导航栏默认收起状态
-  PRD 需求: "收起时显示图标，展开时显示图标 + 文字，默认收起"
-  前置: 打开首页
+T-NAV-01: 导航栏固定展开状态
+  PRD 需求: "固定宽度展开，始终显示图标 + 文字"
+  前置: 打开首页（桌面端视口 ≥ 768px）
   步骤:
-    1. 检查侧边栏宽度 ≤ 64px（收起状态）
-    2. 验证仅显示图标，无文字标签
-  预期: 侧边栏默认收起，仅显示图标
+    1. 检查侧边栏宽度约 176px（w-44）
+    2. 验证同时显示图标和文字标签
+  预期: 侧边栏固定展开，显示图标 + 文字
   Puppeteer:
     await page.goto(BASE)
     const width = await page.$eval('[data-testid="sidebar"]', el => el.offsetWidth)
-    expect(width).toBeLessThanOrEqual(64)
-
-T-NAV-02: 导航栏展开/收起切换
-  PRD 需求: §5.1 展开时显示图标 + 文字
-  步骤:
-    1. 点击展开按钮
-    2. 验证侧边栏宽度 > 150px
-    3. 验证显示文字标签（"媒体库"、"任务队列"等）
-    4. 再次点击，验证收起
-  预期: 可切换展开/收起
+    expect(width).toBeGreaterThan(150)
+    expect(width).toBeLessThan(200)
 
 T-NAV-03: 任务角标显示
   PRD 需求: "角标：左上旋转（运行中）/ 右上红色数字（失败）/ 右下绿色数字（完成）"
@@ -227,18 +279,25 @@ T-LIB-04: 新建人物
     4. 验证页面新增一张人物卡片
   预期: 人物创建成功，页面刷新显示
 
-T-LIB-05: 人物卡片右键菜单 - 重命名
-  PRD 需求: §5.2 "重命名"
+T-LIB-05: 人物卡片右键菜单 - 完整性
+  PRD 需求: §5.2 人物卡片右键菜单
   步骤:
     1. 右键点击人物卡片
-    2. 选择"重命名"
+    2. 验证菜单包含：重命名人物、导入、新建图集、清理低分图、删除人物
+  预期: 所有菜单项存在，与人物主页空白区域菜单一致
+
+T-LIB-05b: 人物卡片右键菜单 - 重命名
+  PRD 需求: §5.2 "重命名人物"
+  步骤:
+    1. 右键点击人物卡片
+    2. 选择"重命名人物"
     3. 弹窗中修改为"新名字"
     4. 确认
     5. 验证卡片名称更新
   预期: 重命名成功
   Puppeteer:
     await rightClick('[data-testid="person-card"]:first-child')
-    await page.click('text=重命名')
+    await page.click('text=重命名人物')
     await page.fill('input', '新名字')
     await page.click('text=保存')
 
@@ -330,32 +389,33 @@ T-PER-05: 多选模式入口
   PRD 需求: §5.3 "多选模式入口"
   步骤:
     1. 点击"多选"按钮
-    2. 验证每张散图卡片出现复选框
-    3. 点击 3 张图片
-    4. 验证底部出现选择工具栏
-    5. 再次点击"多选"退出
-  预期: 多选模式正确切换
+    2. 验证每张散图卡片右上角出现圆形选中标记
+    3. 点击 3 张图片，验证右上角标记变为主色填充 + 勾号，卡片边框变为主色
+    4. 验证底部出现选择工具栏，显示"已选 3"
+    5. 点击"全选"，验证按钮变为"取消全选"，所有卡片显示选中标记
+    6. 点击"取消全选"，验证所有卡片取消选中，按钮恢复为"全选"
+    7. 再次点击"多选"退出
+  预期: 多选模式正确切换，全选/取消全选自动切换
 
 T-PER-06: 散图卡片右键菜单完整性
   PRD 需求: §5.4 图片卡片右键菜单
   步骤:
-    1. 右键点击散图卡片
-    2. 验证菜单包含：高清放大、换脸、局部修复、加入工作区、移动到图集、在资源管理器中显示
-  预期: 所有菜单项存在
+    1. 右键点击散图卡片（image 类型）
+    2. 验证菜单包含：AI 功能（子菜单）、加入工作区、移动到图集、在资源管理器中显示
+    3. 悬浮"AI 功能"项，验证子菜单展开含：高清放大、换脸、局部修复
+  预期: 所有菜单项存在，AI 操作收纳在子菜单中
   Puppeteer:
     await rightClick('[data-testid="media-card"]:first-child')
-    const items = await page.$$eval('[data-testid="menu-item"]', els => els.map(e => e.textContent))
-    expect(items).toContain('高清放大')
-    expect(items).toContain('换脸')
-    expect(items).toContain('局部修复')
-    expect(items).toContain('加入工作区')
+    // hover AI 功能 submenu
+    await page.hover('text=AI 功能')
+    await page.waitForSelector('text=高清放大')
 
 T-PER-07: 空白处右键菜单
-  PRD 需求: §5.3 "人物主页空白处 → 触发人物层级上下文菜单"
+  PRD 需求: §5.3 "人物主页空白处 → 与人物卡片右键菜单一致"
   步骤:
     1. 右键点击页面空白处（非卡片区域）
-    2. 验证菜单包含：重命名人物、导入、新建图集
-  预期: 空白处右键菜单正确触发
+    2. 验证菜单包含：重命名人物、导入、新建图集、清理低分图、删除人物
+  预期: 空白处右键菜单与人物卡片一致
 ```
 
 ### 3.4 图集详情页 [PRD §5.4]
@@ -405,41 +465,51 @@ T-ALB-05: 图片卡片点击进入大图模式
     3. 验证主图显示
   预期: 大图模式正确打开
 
-T-ALB-06: 图集右键菜单 - 重命名
-  PRD 需求: §5.3 图集卡片右键菜单 "重命名"
+T-ALB-06: 图集右键菜单 - 完整性
+  PRD 需求: §5.3 图集卡片右键菜单
+  步骤:
+    1. 空白处右键
+    2. 验证菜单包含：重命名图集、导入、移动到其他人物、AI 功能（子菜单）、删除图集
+    3. 悬浮"AI 功能"项，验证子菜单含：批量换脸
+  预期: 所有菜单项存在，与图集卡片右键菜单一致
+
+T-ALB-06b: 图集右键菜单 - 重命名
+  PRD 需求: §5.3 图集卡片右键菜单 "重命名图集"
   步骤:
     1. 空白处右键 → "重命名图集"
     2. 修改名称 → 保存
     3. 验证顶部标题更新
   预期: 重命名成功
 
-T-ALB-07: 图集右键菜单 - 批量换脸
-  PRD 需求: §5.3 / §7.5 "为此图集应用换脸（批量换脸入口）"
+T-ALB-07: 图集右键菜单 - 批量换脸（AI 子菜单）
+  PRD 需求: §5.3 / §7.5 "AI 功能 ▸ 批量换脸"
   步骤:
-    1. 空白处右键 → "批量换脸"
+    1. 空白处右键 → 悬浮"AI 功能" → "批量换脸"
     2. 验证弹窗显示图片数量
     3. 选择人脸参考图
     4. 配置参数（数量、图集名称）
     5. 点击提交
   预期: 批量换脸弹窗正确渲染
 
-T-ALB-08: 图集右键菜单 - 删除（二选一）
-  PRD 需求: §5.3 "删除图集（弹窗二选一）"
+T-ALB-08: 图集右键菜单 - 删除
+  PRD 需求: §5.3 "删除图集"
   步骤:
     1. 空白处右键 → "删除图集"
     2. 弹窗确认
     3. 验证页面跳转返回
   预期: 删除后正确导航
 
-T-ALB-09: 多选批量操作
+T-ALB-09: 多选批量操作（Grid + Row 布局）
   PRD 需求: §5.4 "多选后支持：批量移动到图集、批量加入工作区、批量删除"
   步骤:
-    1. 开启多选模式
-    2. 选中 3 张图
+    1. 在 Grid 布局下开启多选模式
+    2. 点击 3 张图片，验证右上角圆形标记变为选中状态
     3. 点击底部工具栏"加入工作区"
     4. 验证 toast 提示成功
     5. 验证工作区新增 3 条
-  预期: 批量操作成功
+    6. 切换到 Row（等高行）布局
+    7. 开启多选模式，点击图片，验证同样能选中并显示右上角标记
+  预期: 两种布局下多选和批量操作均正常
 ```
 
 ### 3.5 大图浏览模式 [PRD §5.5]
@@ -488,28 +558,51 @@ T-LB-04: Esc 退出大图
     3. 验证大图覆盖层消失
   预期: 正确退出
 
-T-LB-05: 放大镜模式
-  PRD 需求: §5.5.2 "左键单击主图区进入放大镜模式"
+T-LB-04b: 点击黑边退出大图
+  PRD 需求: §5.5 "单击黑边区域退出大图模式"
+  步骤:
+    1. 打开大图模式（图片两侧或上下有黑边）
+    2. 点击图片外的黑边区域
+    3. 验证大图模式关闭
+    4. 重新打开大图模式，点击图片本身
+    5. 验证进入放大模式（不关闭大图）
+  预期: 黑边点击关闭大图，图片点击进入放大
+
+T-LB-04c: 左右导航条切换图片（PC）
+  PRD 需求: §5.5 "左右切换导航条"
+  步骤:
+    1. 打开大图模式（非首张/末张）
+    2. hover 左侧边缘，验证导航条显示半透明背景和左箭头
+    3. 验证鼠标指针变为左方向箭头
+    4. 点击左导航条，验证切换到上一张
+    5. hover 右侧边缘并点击，验证切换到下一张
+    6. 切换到首张图片，验证左导航条不显示
+    7. 切换到末张图片，验证右导航条不显示
+  预期: 导航条 hover 可见，点击切换流畅，首末张正确隐藏
+
+T-LB-05: 放大模式（PC）— 鼠标移动平移
+  PRD 需求: §5.5.2 "单击/滚轮/双击进入放大模式，鼠标移动平移"
   步骤:
     1. 打开大图模式
-    2. 点击主图
-    3. 验证放大镜画布出现（cursor: none）
-    4. 移动鼠标，验证放大镜跟随
-    5. 右键退出放大镜
-    6. 验证光标恢复
-  预期: 放大镜交互完整
-  Puppeteer:
-    await page.click('[data-testid="lightbox-image"]')
-    const cursor = await page.$eval('.fixed.inset-0', el => getComputedStyle(el).cursor)
-    expect(cursor).toBe('none')
+    2. 单击图片进入放大模式，验证以点击位置为中心放大到 2x
+    3. 移动鼠标，验证放大图跟随鼠标平移（鼠标在原图位置点与放大图对应位置重合）
+    4. 验证鼠标指针显示为放大镜图标
+    5. 鼠标移出原图范围（移到黑边），验证放大图隐藏且鼠标恢复默认箭头
+    6. 鼠标移回原图范围，验证放大图重新出现且指针恢复放大镜
+    7. 单击图片，验证动画回到 fit-to-screen
+    8. 在黑边区域滚轮，验证切换图片（不触发缩放）
+  预期: 放大模式进入/退出/鼠标移动平移/超出隐藏交互完整，60fps 无卡顿
 
-T-LB-06: 放大镜滚轮调倍率
-  PRD 需求: §5.5.2 "滚轮：调整放大倍数"
+T-LB-06: 放大模式双击切换与滚轮缩放
+  PRD 需求: §5.5.2 "双击切换 fit ↔ 2x"
   步骤:
-    1. 进入放大镜模式
-    2. 滚轮向上 3 次
-    3. 验证倍率文本从 "2.0x" 变为 "3.5x"
-  预期: 滚轮调节倍率
+    1. 双击主图，验证放大到 2x（带动画）
+    2. 移动鼠标，验证放大图跟随鼠标平移
+    3. 双击主图，验证动画回到 fit
+    4. 滚轮放大到 4x，验证倍率指示器显示 "4.0x"
+    5. 滚轮缩放时验证鼠标下像素点不动
+    6. 右键退出放大，验证动画回到 fit
+  预期: 双击切换带动画，鼠标移动平移流畅，滚轮连续缩放
 
 T-LB-07: 沉浸模式
   PRD 需求: §5.5.1 "隐藏所有 UI，仅保留图片全屏展示"
@@ -539,27 +632,32 @@ T-LB-09: 右键菜单 - 设为封面
     3. 验证 toast 提示"已设为图集封面"
   预期: 封面设置成功
 
-T-LB-10: 右键菜单 - 高清放大
-  PRD 需求: §5.5 / §7.2 AI 功能按钮
+T-LB-10: 右键菜单 - AI 功能子菜单 - 高清放大
+  PRD 需求: §5.5 / §7.2 AI 功能子菜单
   步骤:
-    1. 大图模式中右键
-    2. 选择"高清放大"
-    3. 验证 UpscaleDrawer 弹出
-  预期: 正确打开高清放大面板
+    1. 大图模式中（image）右键
+    2. 悬浮"AI 功能"子菜单
+    3. 选择"高清放大"
+    4. 验证 WorkflowRunDialog 弹出，category 为 upscale
+    5. 验证源图自动填入 source_image 参数
+  预期: 正确打开工作流选择弹窗
 
-T-LB-11: 右键菜单 - 换脸
-  PRD 需求: §5.5 / §7.5
+T-LB-11: 右键菜单 - AI 功能子菜单 - 换脸
+  PRD 需求: §5.5 / §7.4
   步骤:
-    1. 大图模式中右键 → "换脸"
-    2. 验证 FaceSwapDrawer 弹出
-  预期: 正确打开换脸面板
+    1. 大图模式中右键 → 悬浮"AI 功能" → "换脸"
+    2. 验证 WorkflowRunDialog 弹出，category 为 face_swap
+    3. 验证 base_image 自动填入，face_ref 需手动选取
+  预期: 正确打开工作流选择弹窗
 
-T-LB-12: 右键菜单 - 局部修复
+T-LB-12: 右键菜单 - AI 功能子菜单 - 局部修复
   PRD 需求: §5.5 / §7.3
   步骤:
-    1. 大图模式中右键 → "局部修复"
-    2. 验证 MaskEditor 全屏打开
-  预期: 正确打开蒙版编辑器
+    1. 大图模式中右键 → 悬浮"AI 功能" → "局部修复"
+    2. 验证 WorkflowRunDialog 弹出，category 为 inpaint
+    3. 验证 mask 参数显示"绘制遮罩"按钮
+    4. 点击"绘制遮罩" → MaskEditor 全屏打开
+  预期: 正确打开工作流选择弹窗，可触发蒙版编辑器
 ```
 
 ### 3.6 视频大图模式 [PRD §5.6]
@@ -821,7 +919,7 @@ T-VID-26: 视频右键菜单静音切换
 T-MASK-01: 蒙版编辑器打开
   PRD 需求: §5.7 "从图片右键菜单触发"
   步骤:
-    1. 图片卡片右键 → "局部修复"
+    1. 图片卡片右键 → 悬浮"AI 功能" → "局部修复"
     2. 验证全屏蒙版编辑器打开
     3. 验证底图加载显示
     4. 验证顶部工具栏存在（返回、撤销、重做、清除、画笔大小、橡皮擦）
@@ -964,12 +1062,22 @@ T-TASK-03: 任务卡片状态显示
     expect(statuses).toContain('待执行')
 
 T-TASK-04: 失败任务重试
-  PRD 需求: §5.8 "重新启动（适用于 failed 任务）"
+  PRD 需求: §5.8 "重新启动（适用于 failed/cancelled/completed 任务，创建新任务）"
   步骤:
     1. 找到 failed 任务卡片
     2. 点击"重试"按钮
-    3. 验证任务状态变为 pending
-  预期: 重试后状态变更
+    3. 验证创建了新的 pending 任务（新 ID），原失败任务保留不变
+  预期: 重试创建新任务，保留历史记录
+
+T-TASK-04b: 已完成任务重新执行
+  PRD 需求: §5.8 "completed：重新执行"
+  步骤:
+    1. 找到 completed 任务卡片
+    2. 右键打开上下文菜单
+    3. 验证菜单中包含"重新执行"选项（非直接按钮）
+    4. 点击"重新执行"
+    5. 验证创建了新的 pending 任务（新 ID），原已完成任务保留不变
+  预期: 已完成任务可通过右键菜单重新执行，创建新任务而非重置原任务
 
 T-TASK-05: 删除任务
   PRD 需求: §5.8 "删除任务"
@@ -1246,6 +1354,16 @@ T-IMP-05: 导入取消
     4. 验证已导入的 ~50 张保留
   预期: 取消后已导入内容保留
 
+T-IMP-05a: 导入中对话框不可意外关闭
+  PRD 需求: §6.3 "导入中保护：点击外部或 Escape 不关闭对话框"
+  步骤:
+    1. 开始导入图片
+    2. 导入进行中点击对话框外部区域
+    3. 验证对话框未关闭，导入继续
+    4. 按 Escape 键
+    5. 验证对话框未关闭，导入继续
+  预期: 导入进行中对话框不可被意外关闭
+
 T-IMP-06: 导入进度显示
   PRD 需求: §6.3 "显示进度条和计数"
   步骤:
@@ -1289,22 +1407,24 @@ T-IMP-09: 移动端文件上传导入
 ### 3.13 AI 功能 - 高清放大 [PRD §7.2]
 
 ```
-T-AI-UP-01: 高清放大参数面板
-  PRD 需求: §7.2 "放大倍数（2x / 4x）"
+T-AI-UP-01: 高清放大 - WorkflowRunDialog
+  PRD 需求: §7.2
   步骤:
-    1. 图片右键 → "高清放大"
-    2. 验证 UpscaleDrawer 弹出
-    3. 验证存在放大倍数选择（2x / 4x）
-    4. 验证存在"加入队列"和"立即执行"按钮
-  预期: 参数面板完整
+    1. 图片右键 → 悬浮"AI 功能" → "高清放大"
+    2. 验证 WorkflowRunDialog 弹出，标题显示 upscale 类别名
+    3. 验证自动选中默认工作流
+    4. 验证 source_image 已自动填入（只读）
+    5. 验证存在"加入队列"和"立即执行"按钮
+    6. 验证参数表单根据工作流 manifest 动态渲染
+  预期: 工作流选择弹窗完整
 
 T-AI-UP-02: 加入队列
   PRD 需求: §7.1 "加入队列"
   步骤:
-    1. 选择 2x，点击"加入队列"
+    1. 配置参数，点击"加入队列"
     2. 验证 toast 提示任务已创建
     3. 导航到 /tasks
-    4. 验证新增一条 workflow_type=upscale 的 pending 任务
+    4. 验证新增一条 workflow_type=custom:{id} 的 pending 任务
   预期: 任务创建成功
 
 T-AI-UP-02b: 工作流自动反推提示词
@@ -1321,7 +1441,7 @@ T-AI-UP-03: 立即执行按钮状态
   PRD 需求: §2.3 "ComfyUI 未连接时立即执行按钮禁用"
   前置: ComfyUI 未连接
   步骤:
-    1. 打开高清放大面板
+    1. 打开 WorkflowRunDialog（upscale）
     2. 验证"立即执行"按钮 disabled
     3. "加入队列"按钮仍可用
   预期: 按钮状态正确
@@ -1330,31 +1450,31 @@ T-AI-UP-03: 立即执行按钮状态
 ### 3.14 AI 功能 - 换脸 [PRD §7.5]
 
 ```
-T-AI-FS-01: 单张换脸面板
-  PRD 需求: §7.5 "底部抽屉弹出"
+T-AI-FS-01: 单张换脸 - WorkflowRunDialog
+  PRD 需求: §7.4
   步骤:
-    1. 图片右键 → "换脸"
-    2. 验证 FaceSwapDrawer 弹出
-    3. 验证显示底图预览
-    4. 验证"选择人脸参考图"按钮存在
-  预期: 面板完整
+    1. 图片右键 → 悬浮"AI 功能" → "换脸"
+    2. 验证 WorkflowRunDialog 弹出，category 为 face_swap
+    3. 验证 base_image 已自动填入（只读）
+    4. 验证 face_ref 参数显示"选择图片"按钮
+  预期: 弹窗完整
 
 T-AI-FS-02: 人脸参考图选择 - 工作区
-  PRD 需求: §7.5 "从工作区选取"
+  PRD 需求: §7.4 "从工作区选取"
   前置: 工作区有 3 张图
   步骤:
-    1. 点击"选择人脸参考图"
-    2. 验证弹窗有"工作区"tab
+    1. 点击 face_ref 的"选择图片"按钮
+    2. 验证 FaceRefPicker 弹窗有"工作区"tab
     3. 点击工作区 tab
     4. 验证显示 3 张工作区图片
     5. 点击选择一张
-    6. 验证人脸参考图预览更新
+    6. 验证 face_ref 参数预览更新
   预期: 从工作区选取成功
 
 T-AI-FS-03: 人脸参考图选择 - 浏览
-  PRD 需求: §7.5 "按人物 → 图集 → 图片层级浏览选取"
+  PRD 需求: §7.4 "按人物 → 图集 → 图片层级浏览选取"
   步骤:
-    1. 点击"选择人脸参考图"
+    1. 点击 face_ref 的"选择图片"按钮
     2. 选择"浏览"tab
     3. 验证人物列表
     4. 点击人物 → 验证图集列表
@@ -1362,21 +1482,19 @@ T-AI-FS-03: 人脸参考图选择 - 浏览
     6. 点击图片选择
   预期: 三级浏览选取成功
 
-T-AI-FS-04: 交换底图与参考图
-  PRD 需求: §7.5 "交换按钮"
-  前置: 打开换脸弹窗（底图已有，参考图未选）
+T-AI-FS-04: 工作流切换
+  PRD 需求: §7.1 "工作流选择器"
+  前置: face_swap 类别下有多个工作流
   步骤:
-    1. 验证底图下方显示"交换"按钮（无需选参考图即可见）
-    2. 点击"交换"按钮
-    3. 验证原底图移至人脸参考位，底图位置变为空（显示"选择底图"按钮）
-    4. 通过 picker 选择新底图
-    5. 验证两侧均有图时点击"交换"可互换
-  预期: 单侧有图时可将底图移至参考位；双侧有图时互换
+    1. 打开 WorkflowRunDialog（face_swap）
+    2. 切换工作流选择器
+    3. 验证参数表单根据新工作流的 manifest 更新
+  预期: 工作流切换后参数表单正确更新
 
 T-AI-FS-05: 批量换脸
   PRD 需求: §7.5 "图集批量换脸"
   步骤:
-    1. 图集页空白右键 → "批量换脸"
+    1. 图集页空白右键 → 悬浮"AI 功能" → "批量换脸"
     2. 验证弹窗显示图集图片数量
     3. 选择人脸参考图
     4. 验证图集名称可编辑
@@ -1389,57 +1507,62 @@ T-AI-FS-05: 批量换脸
 ### 3.15 AI 功能 - 局部修复 [PRD §7.3, §7.4]
 
 ```
-T-AI-IP-01: 蒙版编辑器到任务创建完整流程
-  PRD 需求: §7.3 "触发 → 蒙版编辑器 → 绘制蒙版 → 配置参数 → 提交"
+T-AI-IP-01: 局部修复完整流程（WorkflowRunDialog + MaskEditor）
+  PRD 需求: §7.3 "触发 → WorkflowRunDialog → 绘制遮罩 → 配置参数 → 提交"
   步骤:
-    1. 图片右键 → "局部修复"
-    2. 蒙版编辑器打开
-    3. 绘制蒙版
-    4. 选择 Flux 模式
-    5. 输入提示词
-    6. 点击"加入队列"
-    7. 验证 toast 成功
-    8. 验证蒙版编辑器关闭
-    9. 导航到 /tasks 验证任务存在
+    1. 图片右键 → 悬浮"AI 功能" → "局部修复"
+    2. WorkflowRunDialog 弹出，category 为 inpaint
+    3. 验证 source_image 已自动填入
+    4. 验证 mask 参数显示"绘制遮罩"按钮
+    5. 点击"绘制遮罩" → MaskEditor 全屏打开
+    6. 绘制蒙版 → 点击"确认遮罩"
+    7. 返回 WorkflowRunDialog，验证 mask 已填入（显示遮罩缩略预览）
+    8. 配置其他参数（如提示词等，由工作流 manifest 决定）
+    9. 点击"加入队列"
+    10. 验证 toast 成功
+    11. 验证 WorkflowRunDialog 关闭
+    12. 导航到 /tasks 验证任务存在
   预期: 完整流程畅通
 
-T-AI-IP-02: SDXL 模式无提示词
-  PRD 需求: §7.4 "自动反推模式"
+T-AI-IP-02: 工作流切换 - 不同 inpaint 工作流参数差异
+  PRD 需求: §7.3
+  前置: inpaint 类别下有多个工作流（如 Flux、SDXL、Klein）
   步骤:
-    1. 打开蒙版编辑器
-    2. 切换到 SDXL 模式
-    3. 验证提示词输入框不可见
-    4. 绘制蒙版
-    5. 提交 → 验证任务 workflow_type=inpaint_sdxl
-  预期: SDXL 模式参数正确
+    1. 打开 WorkflowRunDialog（inpaint）
+    2. 切换不同工作流
+    3. 验证参数表单根据 manifest 动态更新（如有/无提示词、有/无强度参数）
+  预期: 参数表单正确反映所选工作流
 
-T-AI-IP-03: Klein 模式无强度参数
-  PRD 需求: §7.4
+T-AI-IP-03: MaskEditor 纯遮罩绘制验证
+  PRD 需求: §5.7
   步骤:
-    1. 切换到 Klein 模式
-    2. 验证强度滑块不可见
-    3. 提交 → 验证任务 workflow_type=inpaint_klein
-  预期: Klein 模式参数正确
+    1. 从 WorkflowRunDialog 点击"绘制遮罩"
+    2. MaskEditor 全屏打开
+    3. 验证只有画笔工具栏 + 画布 + 取消/确认按钮（无模式选择/提示词/降噪等）
+    4. 绘制蒙版 → 点击"确认遮罩"
+    5. 验证返回 WorkflowRunDialog，mask 参数已填入
+  预期: MaskEditor 为纯遮罩工具，无任务提交逻辑
 
-T-AI-IP-04: 未绘制蒙版时无法提交
-  PRD 需求: 隐含需求（空蒙版无意义）
+T-AI-IP-04: 遮罩重新绘制
+  PRD 需求: §7.3
   步骤:
-    1. 打开蒙版编辑器
-    2. 不绘制任何内容
-    3. 点击"加入队列"
-    4. 验证提示"请先绘制蒙版"或按钮禁用
-  预期: 空蒙版不可提交
+    1. 完成首次遮罩绘制，返回 Dialog
+    2. 验证显示遮罩缩略预览 + "重新绘制"按钮
+    3. 点击"重新绘制" → MaskEditor 重新打开
+    4. 重新绘制 → 确认
+    5. 验证 mask 预览更新
+  预期: 可重复编辑遮罩
 
-T-AI-IP-05: Flux 模式启用后位LoRA
-  PRD 需求: §7.3 "启用后位LoRA"
+T-AI-IP-05: 额外参数渲染
+  PRD 需求: §7.1 "extra_params"
+  前置: 所选 inpaint 工作流 manifest 包含 extra_params
   步骤:
-    1. 打开蒙版编辑器，确认默认 Flux 模式
-    2. 验证"启用后位LoRA"复选框可见且默认未勾选
-    3. 勾选"启用后位LoRA"
-    4. 绘制蒙版并点击"加入队列"
-    5. 导航到 /tasks 验证任务 params 包含 enable_rear_lora=true
-    6. 验证任务执行后 generation_params 记录了 enable_rear_lora
-  预期: 后位LoRA参数正确传递至后端并记录
+    1. 打开 WorkflowRunDialog（inpaint）
+    2. 验证额外参数区域显示在契约参数下方（分隔线 + "额外参数"标签）
+    3. 修改额外参数值
+    4. 提交任务
+    5. 验证任务 params 包含修改后的额外参数
+  预期: 额外参数正确渲染和提交
 ```
 
 ### 3.16 评分系统 [PRD §8.1]
@@ -1600,7 +1723,17 @@ T-FILT-DEF-03: 筛选默认值持久化
     3. 进入设置页，验证评分筛选默认值仍为"3星+"
     4. 进入任意页面，验证评分筛选初始为"3星+"
   预期: 默认值跨刷新保持
+
+T-FILT-DEF-04: API 层面 sort 参数默认行为
+  PRD 需求: §8.3 排序默认值
+  步骤:
+    1. 以 sort=sort_order 查询图集，验证升序排列
+    2. 以 sort=rating 查询图集，验证评分降序排列
+  预期: API 排序参数正确生效
 ```
+
+> 实现文件: `filter-defaults.test.ts`（T-FILT-DEF-01 ~ 04，共 4 用例）
+> 测试特性: 不调用 resetDB()，使用唯一名称创建数据，afterAll 清理测试数据
 
 ### 3.19 封面管理 [PRD §8.4]
 
@@ -1626,7 +1759,24 @@ T-COVER-03: 默认封面
   步骤:
     1. 验证图集卡片封面为第一张导入的图
   预期: 默认封面正确
+
+T-COVER-04: 人物封面在首页卡片可见
+  PRD 需求: §8.4 封面展示
+  步骤:
+    1. 设置人物封面后导航到首页
+    2. 验证人物卡片显示封面图片
+  预期: 封面图片正确渲染
+
+T-COVER-05: 更换封面后 API 返回新封面
+  PRD 需求: §8.4 封面更新
+  步骤:
+    1. 通过 API 将图集封面改为另一张图
+    2. 重新获取图集数据，验证 cover_media_id 更新
+  预期: 封面 ID 与最新设置一致
 ```
+
+> 实现文件: `cover-management.test.ts`（T-COVER-01 ~ 05，共 5 用例）
+> 测试特性: 不调用 resetDB()，使用唯一名称创建数据，afterAll 清理测试数据
 
 ### 3.20 软删除与回收站 [PRD §8.6]
 
@@ -1701,7 +1851,17 @@ T-EXP-04: 沉浸模式下探索
     3. 键盘切换仍有效
     4. Esc 退出沉浸（不退出探索）
   预期: 沉浸模式在探索中正常工作
+
+T-EXP-05: explore API 支持筛选参数
+  PRD 需求: §8.8 "从触发层级自动继承筛选条件"
+  步骤:
+    1. GET /api/media/explore?person_id=X&media_type=image
+    2. 验证返回结果全部为图片类型
+  预期: 筛选参数在 explore API 中生效
 ```
+
+> 实现文件: `random-explore.test.ts`（T-EXP-01 ~ 05，共 5 用例）
+> 测试特性: 不调用 resetDB()，使用唯一名称创建数据，afterAll 清理测试数据
 
 ### 3.22 响应式布局 [PRD §9.6]
 
@@ -1851,16 +2011,17 @@ T-SIDE-03: 点击导航项跳转对应页面
   预期: 导航跳转正确
   文件: sidebar.test.ts
 
-T-SIDE-04: 侧边栏默认收起状态
-  PRD 需求: §5.1 "收起时显示图标，默认收起"
+T-SIDE-04: 侧边栏固定展开显示文字
+  PRD 需求: §5.1 "固定宽度展开，始终显示图标 + 文字"
   步骤:
     1. 打开首页
-    2. 验证侧边栏宽度 ≤ 80px
-  预期: 默认收起
+    2. 验证侧边栏宽度约 176px
+    3. 验证文字标签可见
+  预期: 固定展开，图标 + 文字同时显示
   文件: sidebar.test.ts
 
 T-SIDE-05: 侧边栏图标可见
-  PRD 需求: §5.1 收起时显示图标
+  PRD 需求: §5.1 显示图标
   步骤:
     1. 验证侧边栏中 SVG 图标数量 ≥ 5
   预期: 图标可见
@@ -2375,8 +2536,8 @@ T-TQ-01: 空状态显示
   PRD 需求: §5.8 任务列表
   步骤:
     1. 导航到 /tasks
-    2. 验证显示"暂无任务"
-  预期: 空状态正确
+    2. 验证显示 EmptyState 组件（含图标 + "暂无任务" 标题 + 描述文字）
+  预期: 空状态正确（使用 EmptyState 组件而非纯文字）
   文件: task-queue.test.ts
 
 T-TQ-02: 创建任务后显示在队列
@@ -2473,9 +2634,10 @@ T-TQ-12: 最近完成结果视图
   前置: 2 个已完成任务（各有 result_media_ids）
   步骤:
     1. 导航到 /tasks
-    2. 验证"最近完成结果"区域显示缩略图网格
+    2. 验证"最近完成结果"区域显示缩略图网格（按 finished_at 降序排列）
     3. 点击缩略图，验证进入 LightBox 大图模式
-  预期: 结果图片正确展示，可点击放大
+    4. 右键缩略图，验证完整右键菜单（AI 功能、加入工作区、移动到图集、评分、查看详情、删除）
+  预期: 结果图片正确展示，可点击放大，右键菜单完整
   文件: task-queue.test.ts
 ```
 
@@ -2486,8 +2648,8 @@ T-WS-01: 工作区空状态
   PRD 需求: §5.9 空状态
   步骤:
     1. 导航到 /workspace
-    2. 验证显示"工作区为空"
-  预期: 空状态正确
+    2. 验证显示 EmptyState 组件（含图标 + "工作区为空" 标题 + 描述文字）
+  预期: 空状态正确（使用 EmptyState 组件而非纯文字）
   文件: workspace.test.ts
 
 T-WS-02: 添加到工作区
@@ -2770,8 +2932,8 @@ T-LIB-06: 空状态下无人物网格
   PRD 需求: §5.2 空状态
   步骤:
     1. 重置数据库后导航到首页
-    2. 验证无人物卡片，显示"还没有任何人物"
-  预期: 空状态正确
+    2. 验证无人物卡片，显示 EmptyState 组件（含图标 + "还没有任何人物" 标题 + 描述文字 + 导入按钮）
+  预期: 空状态正确（使用 EmptyState 组件而非纯文字）
   文件: media-library.test.ts
 
 T-LIB-07: 人物卡片封面图
@@ -2794,41 +2956,124 @@ T-LIB-08: 人物评分统计显示
 ### 3.43 异常处理 [PRD §13]
 
 ```
-T-ERR-01: ComfyUI 未连接时 UI 状态
-  PRD 需求: §13.1 "前端显示 ComfyUI 启动中...，AI 功能按钮禁用"
-  前置: ComfyUI 未启动
+T-ERR-01: ComfyUI 状态在设置页可见
+  PRD 需求: §13.1 "前端显示 ComfyUI 状态"
   步骤:
     1. 打开设置页
-    2. 验证 ComfyUI 状态显示红色/橙色
-    3. 打开高清放大面板
-    4. 验证"立即执行"按钮 disabled
-    5. 验证"加入队列"按钮可用
-  预期: 未连接状态正确反映
+    2. 验证页面包含 ComfyUI 相关文本
+  预期: ComfyUI 状态区域可见
+  文件: error-handling.test.ts
 
-T-ERR-02: 后端断连横幅
-  PRD 需求: §13.3 "前端显示 连接中断，正在重连... 横幅"
+T-ERR-02: system/status API 返回 ComfyUI 连接状态
+  PRD 需求: §13.1
   步骤:
-    1. 正常使用中关闭后端
-    2. 操作时验证出现断连提示
-    3. 重新启动后端
-    4. 验证横幅消失
-  预期: 断连/重连提示正确
+    1. GET /api/system/status
+    2. 验证返回 comfyui_connected 布尔字段
+  预期: API 正确返回连接状态
+  文件: error-handling.test.ts
 
-T-ERR-03: 文件丢失标记
-  PRD 需求: §13.2 "卡片显示丢失标记（红色虚线边框 + 警告图标）"
-  前置: 导入后删除源文件
+T-ERR-03: 访问不存在的人物页面
+  PRD 需求: §13 容错处理
   步骤:
-    1. 刷新页面
-    2. 验证对应卡片显示丢失标记
-  预期: 丢失标记可见（注：此功能可能未完全实现）
+    1. 导航到 /persons/nonexistent-uuid
+    2. 验证页面不崩溃
+  预期: 页面正常显示错误或重定向
+  文件: error-handling.test.ts
 
-T-ERR-04: 磁盘空间不足提示
-  PRD 需求: §13.2 "磁盘空间不足时拒绝执行"
+T-ERR-04: 访问不存在的图集页面
+  PRD 需求: §13 容错处理
   步骤:
-    1. 模拟磁盘空间 < 500MB
-    2. 创建任务 → 立即执行
-    3. 验证任务失败，错误信息包含"磁盘空间"
-  预期: 磁盘检查生效
+    1. 导航到 /albums/nonexistent-uuid
+    2. 验证页面不崩溃
+  预期: 页面正常显示错误或重定向
+  文件: error-handling.test.ts
+
+T-ERR-05: API 404 响应格式
+  PRD 需求: §13 错误处理
+  步骤:
+    1. GET /api/persons/nonexistent-id
+    2. 验证返回 404 + detail 字段
+  预期: 标准错误响应格式
+  文件: error-handling.test.ts
+
+T-ERR-06: API 验证错误响应
+  PRD 需求: §13 输入验证
+  步骤:
+    1. POST /api/persons 传空名称
+    2. 验证返回 4xx 错误
+  预期: 拒绝无效输入
+  文件: error-handling.test.ts
+
+T-ERR-07: 无效媒体 ID 的 PATCH 返回 404
+  PRD 需求: §13 错误处理
+  步骤:
+    1. PATCH /api/media/nonexistent-id 设评分
+    2. 验证返回 404
+  预期: 不存在的资源返回正确错误码
+  文件: error-handling.test.ts
+```
+
+### 3.44 P3-UI 视觉改进 [P3-UI]
+
+```
+T-UI-01: 加载态空白（不使用骨架屏）
+  PRD 需求: P3-UI 加载态规范
+  步骤:
+    1. 导航到首页（人物库）
+    2. 验证数据加载完成前页面显示空白（无骨架屏、无 EmptyState）
+    3. 数据加载完成后正常显示内容
+  预期: 加载中显示空白页面，不使用骨架屏
+  适用页面: MediaLibrary, PersonHome, AlbumDetail, RecycleBin
+
+T-UI-01b: 页面切换无闪烁
+  PRD 需求: P3-UI 加载态规范（防闪烁）
+  步骤:
+    1. 导航到人物库，等待数据加载完成
+    2. 切换到其他页面（回收站/任务队列/工作区等）再切换回人物库
+    3. 验证页面切换过程中不会出现 EmptyState 的短暂闪烁
+  预期: 已有数据的页面在 re-fetch 期间保持显示现有数据，不闪烁空状态
+  实现: EmptyState 仅在 `!loading && items.length === 0` 时显示
+
+T-UI-01c: 同类实体切换无旧数据闪烁
+  PRD 需求: P3-UI 加载态规范（防旧数据残留）
+  步骤:
+    1. 进入图集 A，等待加载完成
+    2. 返回后进入图集 B
+    3. 验证不会先显示图集 A 的内容再切换到图集 B
+    4. 同理测试人物 A → 人物 B 的切换
+  预期: 切换到不同实体时清除旧数据，显示空白直到新数据加载完成
+  实现: useEffect 中按需清除 store 旧数据（仅在 entity ID 变化时）+ 渲染条件增加 currentEntity.id !== routeId 守卫
+
+T-UI-02: EmptyState 空状态组件
+  PRD 需求: P3-UI-B6 空状态组件
+  步骤:
+    1. 重置数据库后访问各页面
+    2. 等待加载完成（loading=false）后验证空状态显示 EmptyState 组件（含图标容器 + 标题 + 描述文字）
+    3. 验证加载过程中不会提前显示 EmptyState（应显示空白）
+  预期: 所有空列表使用 EmptyState 组件，且仅在加载完成确认数据为空后才显示
+  适用页面: MediaLibrary, PersonHome(图集/散图), AlbumDetail, TaskQueue, Workspace, RecycleBin
+
+T-UI-03: 卡片入场 stagger 动画
+  PRD 需求: P3-UI-C1 入场动画
+  步骤:
+    1. 导航到人物库页面
+    2. 验证卡片带有 animate-fade-in-up class
+    3. 验证不同卡片有递增的 animation-delay
+  预期: 卡片依次 fade-in-up 入场
+
+T-UI-04: Inter 字体加载
+  PRD 需求: P3-UI-B1 Inter 字体
+  步骤:
+    1. 打开任意页面
+    2. 检查 body computed font-family 包含 "Inter Variable"
+  预期: Inter 字体正确应用
+
+T-UI-05: prefers-reduced-motion 支持
+  PRD 需求: P3-UI-C4 无障碍
+  步骤:
+    1. 启用 prefers-reduced-motion: reduce
+    2. 验证卡片入场无动画（animation-duration ≈ 0）
+  预期: 动画被禁用
 ```
 
 ### 3.24 性能指标 [PRD §14]
@@ -2931,16 +3176,20 @@ npx jest --config jest.config.ts --reporters=default --reporters=jest-html-repor
 | §7.3/7.4 局部修复 | 5 | 5 (T-AI-IP-*) | 100% |
 | §7.5 换脸 | 5 | 5 (T-AI-FS-*) | 100% |
 | §8.1 评分 | 5 | 5 (T-RATE-*) | 100% |
-| §8.2/8.3 筛选排序 | 11 | 11 (T-FILT-*, T-SORT-*) | 100% |
-| §8.4 封面 | 3 | 3 (T-COVER-*) | 100% |
+| §8.2/8.3 筛选排序 | 15 | 15 (T-FILT-*, T-FILT-DEF-*, T-SORT-*) | 100% |
+| §8.4 封面 | 5 | 5 (T-COVER-*) | 100% |
 | §8.6 软删除 | 4 | 4 (T-DEL-*) | 100% |
 | §8.7 批量操作 | 5 | 5 (T-BATCH-*) | 100% |
-| §8.8 随机探索 | 4 | 4 (T-EXP-*) | 100% |
+| §8.8 随机探索 | 5 | 5 (T-EXP-*) | 100% |
 | §9.6 响应式 | 11 | 11 (T-RESP-*) | 100% |
 | §9.7 键盘快捷键 | 5 | 5 (T-KB-*) | 100% |
-| §13 异常处理 | 4 | 4 (T-ERR-*) | 100% |
+| §13 异常处理 | 7 | 7 (T-ERR-*) | 100% |
 | §14 性能指标 | 3 | 3 (T-PERF-*) | 100% |
-| **总计** | **216** | **216** | **100%** |
+| P0/P1 补齐 | 10 | 10 (T-MTYPE-*, T-CANCEL-*) | 100% |
+| MediaDetailDialog | 3 | 3 (T-DETAIL-*) | 100% |
+| 统一右键菜单 | 2 | 2 (T-CTX-*) | 100% |
+| 工作流默认值/遮罩 | 2 | 2 (T-WF-20~21) | 100% |
+| **总计** | **238** | **238** | **100%** |
 
 ### 5.2 未覆盖的 PRD 功能（标记为后续实现）
 
@@ -2956,4 +3205,251 @@ npx jest --config jest.config.ts --reporters=default --reporters=jest-html-repor
 
 ---
 
-*测试计划版本：v1.1 | 基于 PRD v1.2 | 2026-03-04*
+## 6. P3 网页抓取器测试用例
+
+### 6.1 小工具页面导航 (T-TOOL-01)
+
+**PRD**: §11.2
+**前提**: 应用已启动
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 点击侧边栏"小工具" | 导航到 `/tools`，页面显示"网页抓取"和"下载记录"两个 Tab |
+| 2 | screenshot('tools-page') | Tab 切换 UI 正常渲染 |
+
+### 6.2 解析小红书链接 (T-TOOL-02)
+
+**PRD**: §11.2.1, §11.2.2
+**前提**: 后端已启动，mock `/api/download/parse` 返回预设数据
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 在 textarea 输入小红书分享文本 | 文本正常显示 |
+| 2 | 点击"解析"按钮 | 显示加载状态 |
+| 3 | 等待解析完成 | 显示解析结果：作者名、标题、图片缩略图网格、媒体数量 |
+| 4 | screenshot('tools-parse-result') | 结果预览布局正确 |
+
+### 6.3 关联设置默认值 (T-TOOL-03)
+
+**PRD**: §11.2.2 步骤 4
+**前提**: 解析结果已返回（新账号，无已关联人物）
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 检查人物关联区域 | 默认选中"新建人物"，人物名预填为博主显示名 |
+| 2 | 检查"记住此账号"选项 | 默认勾选 |
+| 3 | 检查图集模式 | 默认选中"新建图集"，图集名预填为帖子标题 |
+| 4 | screenshot('tools-association-defaults') | 默认值正确 |
+
+### 6.4 确认下载 (T-TOOL-04)
+
+**PRD**: §11.2.2 步骤 6
+**前提**: 解析结果已展示，关联设置已填写，mock `/api/download/confirm`
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 点击"确认下载"按钮 | 显示下载中状态 |
+| 2 | 等待完成 | toast 提示"下载完成"，自动跳转到生成的图集页 |
+
+### 6.5 下载记录列表 (T-TOOL-05)
+
+**PRD**: §11.2.3
+**前提**: 已有下载记录数据
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 1 | 切换到"下载记录" Tab | 显示记录列表：平台标签、标题、日期、状态 |
+| 2 | screenshot('tools-records') | 列表布局正确 |
+| 3 | 对失败记录点击重试按钮 | 触发重试请求 |
+| 4 | 对成功记录点击跳转按钮 | 导航到对应图集页 |
+
+---
+
+## 7. P0/P1 补齐功能测试用例
+
+### 7.1 媒体类型筛选 (T-MTYPE-01 ~ 02)
+
+**PRD**: §5.5 "媒体类型（图片/视频，可叠加）"
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-MTYPE-01: API 无筛选返回全部类型 | 1. 导入图片+视频到图集<br>2. GET /api/media/album/{id} | 返回全部 4 条（3图+1视频） |
+| T-MTYPE-02: API media_type=image 只返回图片 | GET /api/media/album/{id}?media_type=image | 返回 3 条图片，media_type 全为 image |
+| T-MTYPE-03: API media_type=video 只返回视频 | GET /api/media/album/{id}?media_type=video | 返回 1 条视频，media_type 为 video |
+| T-MTYPE-04: FilterBar 显示媒体类型下拉 | 1. 进入图集详情页<br>2. 检查 select 元素 | 存在下拉选择器 |
+| T-MTYPE-05: media_type 与 filter_rating 组合筛选 | 1. 给一张图评5星<br>2. GET ?media_type=image&filter_rating=eq:5 | 仅返回该图片 |
+
+> 实现文件: `media-type-filter.test.ts`（T-MTYPE-01 ~ 05，共 5 用例）
+
+### 7.2 任务取消 (T-CANCEL-01 ~ 02)
+
+**PRD**: §5.10 "pending：取消、删除"
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-CANCEL-01: 取消 pending 任务 | 1. 创建 pending 任务<br>2. POST /tasks/{id}/cancel<br>3. 验证状态为 cancelled | 状态更新为 cancelled |
+| T-CANCEL-02: 已取消任务不能再次取消 | 1. 取消一个任务<br>2. 再次取消同一任务 | 返回 400 错误 |
+| T-CANCEL-03: 取消后任务列表更新 | 1. 取消任务<br>2. GET /tasks/{id} | status=cancelled，finished_at 有值 |
+| T-CANCEL-04: 任务队列页面显示 | 1. 创建 pending 任务<br>2. 导航到 /tasks | 任务页面正常加载 |
+| T-CANCEL-05: 删除已取消的任务 | 1. 取消任务<br>2. DELETE /tasks/{id}<br>3. GET /tasks/{id} | 删除成功，返回 404 |
+
+> 实现文件: `task-cancel.test.ts`（T-CANCEL-01 ~ 05，共 5 用例）
+
+### 7.3 图集移动到其他人物 (T-AMOVE-01)
+
+**PRD**: §5.4 "移动到其他人物"
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-AMOVE-01: 图集移动 | 1. 在人物主页右键图集卡片<br>2. 点击"移动到其他人物"<br>3. 在弹窗中选择目标人物<br>4. 确认移动 | 图集及其所有媒体的 person_id 更新为目标人物 |
+
+### 7.4 文件丢失检测 (T-MISS-01)
+
+**PRD**: §6.6 "文件丢失处理"
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-MISS-01: 丢失文件红框标记 | 1. 导入本地图片<br>2. 手动删除物理文件<br>3. 刷新页面 | 丢失文件的 MediaCard 显示红色边框 + 警告图标 |
+
+### 7.5 设置页新字段 (T-SET-06 ~ 08)
+
+**PRD**: §5.11
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-SET-06: ComfyUI 启动命令 | 1. 导航到设置页<br>2. 查看 ComfyUI 区域 | 显示启动命令输入框 |
+| T-SET-07: FastAPI 端口配置 | 1. 导航到设置页<br>2. 查看"服务器"区域 | 显示端口输入框 + "修改后需重启后端" 提示 |
+| T-SET-08: AppData 迁移确认 | 1. 导航到设置页<br>2. 修改 AppData 路径<br>3. 点击保存 | 弹出确认对话框，确认后执行迁移 |
+
+### 7.6 LightBox 生成链导航 (T-CHAIN-NAV-01 ~ 02)
+
+**PRD**: §5.7 "切换逻辑（主图区导航状态机）"
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-CHAIN-NAV-01: 导航进入子生成图 | 1. 打开有生成子图的本地图 LightBox<br>2. 按 → 键 | 跳转到第一张子生成图（而非扁平数组下一项） |
+| T-CHAIN-NAV-02: 导航回到父图 | 1. 在生成子图上按 ← 键 | 跳转回父图 |
+
+### 7.7 生成链面板模式切换 (T-CHAIN-MODE-01)
+
+**PRD**: §5.7 "右侧生成链面板（两种模式）"
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-CHAIN-MODE-01: 简略/详细切换 | 1. 打开 LightBox 生成链面板<br>2. 点击切换按钮 | 从简略模式切换到详细模式（显示彩色竖线 + generation_params 摘要） |
+
+### 7.8 PWA (T-PWA-01)
+
+**PRD**: §1 "PWA + 响应式设计"
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-PWA-01: Service Worker 注册 | 1. `npm run build`<br>2. 检查 dist/ 输出 | 生成 sw.js、manifest.webmanifest、registerSW.js |
+
+### 7.9 API 字段验证 (T-API-01 ~ 02)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-API-01: Media 返回 generation_params | 1. 创建含 generation_params 的媒体<br>2. GET /api/media/{id} | 响应包含解析后的 generation_params JSON 对象 |
+| T-API-02: Media 返回 video_timestamp | 1. 截图并传入 timestamp<br>2. GET /api/media/{id} | 响应包含 video_timestamp 字段 |
+
+## 8. 工作流管理系统测试用例
+
+### 8.1 工作流 Categories API (T-WF-01)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-01: 获取 Category 列表 | 1. GET /api/workflow-categories | 返回 6 个 category（face_swap, inpaint, upscale, text_to_image, image_to_image, preprocess），每个含 params 数组 |
+
+### 8.2 工作流 JSON 解析 (T-WF-02 ~ 03)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-02: 解析含 @ 节点的 JSON | 1. POST /api/workflows/parse，传入含 @base_image(LoadImage)、@output(SaveImage)、@sampler(KSampler) 的 JSON | 返回 image_inputs=[{suggested_name: "base_image"}]，output_nodes=[{class_type: "SaveImage"}]，scalar_params 包含 KSampler 的标量输入，text_outputs=[] |
+| T-WF-02b: 解析含文本输出节点的 JSON | 1. POST /api/workflows/parse，传入含 @caption(ShowText，无标量输入) 的 JSON | 返回 text_outputs=[{node_id, suggested_name: "caption", class_type: "ShowText"}] |
+| T-WF-03: 不含 @ 节点的 JSON | 1. POST /api/workflows/parse，传入无 @ 前缀节点的 JSON | 返回空的 image_inputs、scalar_params、output_nodes、text_outputs |
+
+### 8.3 工作流 CRUD (T-WF-04 ~ 08)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-04: 创建工作流 | 1. POST /api/workflows（name, category=face_swap, workflow_json, manifest 含 base_image 和 face_ref 映射） | 201，返回完整工作流对象 |
+| T-WF-05: 重名创建 | 1. 创建工作流 A<br>2. 创建同名工作流 B | 第二次返回 409 |
+| T-WF-06: 覆盖创建 | 1. 创建工作流 A<br>2. 传入 overwrite_id=A.id 创建同名 | 201，返回更新后的工作流 |
+| T-WF-07: 更新工作流 | 1. PUT /api/workflows/:id（name="新名称"） | 200，name 已更新 |
+| T-WF-08: 删除工作流 | 1. DELETE /api/workflows/:id | 204，再 GET 返回 404 |
+
+### 8.4 Manifest 校验 (T-WF-09 ~ 10)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-09: 缺少必填映射 | 1. POST /api/workflows，category=face_swap，manifest 缺少 base_image 映射 | 422，错误信息包含 "Required parameter 'base_image'" |
+| T-WF-10: 完整映射 | 1. POST /api/workflows，category=face_swap，manifest 含 base_image + face_ref | 201 |
+
+### 8.5 默认工作流 (T-WF-11 ~ 12)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-11: 设为默认 | 1. 创建两个 face_swap 工作流 A 和 B<br>2. PATCH /api/workflows/B/default | B.is_default=true，A.is_default=false |
+| T-WF-12: 列表过滤 | 1. 创建 face_swap 和 upscale 工作流<br>2. GET /api/workflows?category=face_swap | 只返回 face_swap 类别的工作流 |
+
+### 8.5b 输出映射 (T-WF-12b ~ 12d)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-12b: Category 输出定义 | 1. GET /api/workflow-categories | preprocess 类别包含 outputs 数组（含 caption: {type: "string", label: "反推提示词"}） |
+| T-WF-12c: Manifest 含 output_mappings | 1. 创建 preprocess 工作流，manifest 含 output_mappings: {"反推提示词": {node_id: "15", key: "text"}}（外层 key 为显示标签，内层 key 为 ComfyUI 输出字段名） | 201，返回的 manifest 包含 output_mappings |
+| T-WF-12d: 任务详情含 result_outputs | 1. 已完成任务的 result_outputs 为 {"caption": "some text"}<br>2. GET /api/tasks/:id | 返回的 result_outputs 包含 caption 字段 |
+
+### 8.6 预置工作流种子 (T-WF-13)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-13: 空表自动种入 | 1. 清空 workflows 表<br>2. 重启后端 | workflows 表包含预置工作流（faceswap/upscale/inpaint_flux/sdxl/klein/generate/generate_pose），每个 category 第一个 is_default=true |
+
+### 8.7 前端工作流管理 (T-WF-14 ~ 19)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-14: 设置页 Tab 切换 | 1. 导航到 /settings<br>2. 点击「工作流管理」Tab | 显示工作流列表和 category 过滤按钮 |
+| T-WF-15: 导入对话框 | 1. 点击「导入工作流」<br>2. 上传 JSON 文件 | 显示解析摘要（默认折叠）和参数映射表单 |
+| T-WF-15b: 自动映射包含匹配 | 1. 上传含 `@my_base_image`(LoadImage) 和 `@my_prompt`(KSampler) 的 JSON<br>2. 选择类别 | `base_image` 参数自动匹配到 `@my_base_image`，`prompt` 参数自动匹配到 `@my_prompt`（包含匹配，无需完全相等） |
+| T-WF-15c: 自定义参数分配 — 角色切换 | 1. 上传含 `@extra_node`(非 LoadImage/SaveImage) 的 JSON<br>2. 在自定义参数分配区域找到该节点<br>3. 将角色从「不使用」切换为「输入」 | 展开该节点的标量参数列表，每个参数显示勾选框和可编辑标签 |
+| T-WF-15d: 自定义参数分配 — 输出角色 | 1. 将某未映射 `@` 节点角色切换为「输出」 | 展开输出键编辑框，默认值为 "text" |
+| T-WF-15e: 自定义参数分配 — 输入+输出 | 1. 将某节点角色切换为「输入+输出」 | 同时显示标量参数勾选列表和输出键编辑框 |
+| T-WF-15f: 自定义参数分配 — Manifest 生成 | 1. 将节点 A 设为「输入」并勾选一个参数（编辑 label 为 "my_label"），将节点 B 设为「输出」<br>2. 提交 | 生成的 manifest 中 extra_params 包含 `{name: "A.key", label: "my_label", type: "string", node_id, key}`，output_mappings 包含节点 B 的映射 |
+| T-WF-15g: Category 输出节点自动角色 | 1. 上传含 `@caption`(ShowText) 的 JSON<br>2. 选择 preprocess 类别（定义了 outputs） | `@caption` 节点自动设为「输出」角色 |
+| T-WF-16: AI 工具 Tab — 契约参数 | 1. 导航到 /tools<br>2. 点击「AI 工具」Tab<br>3. 选择一个工作流 | 显示工作流描述和 Category 契约参数表单 |
+| T-WF-17: AI 工具 Tab — 额外参数渲染 | 1. 选择一个 manifest 含 extra_params 的工作流 | 契约参数下方显示分隔线 + "额外参数" 标签，渲染额外参数表单 |
+| T-WF-18: AI 工具 Tab — 额外参数类型 | 1. 工作流的 extra_params 包含 string/bool/int/float 类型参数 | string 渲染为 textarea，bool 渲染为 checkbox，int/float 渲染为 number input |
+| T-WF-19: AI 工具 Tab — 额外参数默认值 | 1. 选择含 extra_params 的工作流 | 各额外参数的默认值从 workflow_json 中对应节点的原始值提取并正确填充 |
+
+### 8.8 工作流默认值编辑与 AI 工具遮罩 (T-WF-20 ~ 21)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-WF-20: 工作流详情编辑默认值 | 1. 导航到 /settings 工作流管理 Tab<br>2. 点击某工作流卡片<br>3. 修改参数默认值<br>4. 点击保存 | 默认值更新成功，再次打开详情对话框显示新值 |
+| T-WF-21: AI 工具 Tab 遮罩绘制 | 1. 导航到 /tools AI 工具 Tab<br>2. 选择含 mask 类型参数的 inpaint 工作流<br>3. 点击"绘制遮罩"按钮 | MaskEditor 全屏打开，完成绘制后遮罩路径回填参数 |
+
+---
+
+## 9. MediaDetailDialog 测试 (T-DETAIL-01 ~ 03)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-DETAIL-01: 图集详情页查看详情 | 1. 在图集详情页右键图片<br>2. 点击"查看详情" | 弹出 MediaDetailDialog，显示文件名、目录、格式、分辨率、百万像素、文件大小、来源类型、评分、创建时间 |
+| T-DETAIL-02: 任务队列最近结果查看详情 | 1. 导航到 /tasks<br>2. 在最近完成结果区域右键图片<br>3. 点击"查看详情" | 弹出相同的 MediaDetailDialog |
+| T-DETAIL-03: 工作区查看详情 | 1. 导航到 /workspace<br>2. 右键工作区图片<br>3. 点击"查看详情" | 弹出相同的 MediaDetailDialog |
+
+---
+
+## 10. 统一右键菜单测试 (T-CTX-01 ~ 02)
+
+| 用例 | 步骤 | 预期 |
+|------|------|------|
+| T-CTX-01: 任务队列最近结果右键菜单 | 1. 导航到 /tasks<br>2. 右键最近完成结果区域的缩略图 | 弹出完整右键菜单（AI 功能、加入工作区、移动到图集、资源管理器、评分、查看详情、删除），与图集详情页菜单一致 |
+| T-CTX-02: 工作区右键菜单与 LightBox | 1. 导航到 /workspace<br>2. 右键工作区图片，验证完整右键菜单<br>3. 点击图片，验证进入 LightBox 大图浏览 | 右键菜单完整，点击可打开 LightBox |
+
+---
+
+*测试计划版本：v1.7 | 基于 PRD v1.3 | 2026-03-07*

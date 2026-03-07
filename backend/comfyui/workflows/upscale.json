@@ -16,41 +16,42 @@
     "class_type": "LoraLoaderModelOnly",
     "inputs": {
       "model": ["2", 0],
-      "lora_name": "Zimage/ZiB-female解剖学_anatomy.safetensors",
+      "lora_name": "Zimage\\ZiB-female\u89e3\u5256\u5b66_anatomy.safetensors",
       "strength_model": 0.7
     }
   },
   "4": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": ["3", 0],
+      "shift": 3
+    }
+  },
+  "5": {
     "class_type": "VAELoader",
     "inputs": {
       "vae_name": "zImageClearVae_clear.safetensors"
     }
   },
-  "5": {
+  "6": {
     "class_type": "CLIPLoader",
     "inputs": {
       "clip_name": "qwen_3_4b.safetensors",
       "type": "lumina2"
     }
   },
-  "6": {
-    "class_type": "CLIPTextEncode",
-    "inputs": {
-      "clip": ["5", 0],
-      "text": "一位年轻女性，半身人像，自然光，高清细节，真实摄影风格"
-    }
-  },
   "7": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "clip": ["5", 0],
-      "text": ""
+      "clip": ["6", 0],
+      "text": ["14", 0]
     }
   },
   "8": {
-    "class_type": "ConditioningZeroOut",
+    "class_type": "CLIPTextEncode",
     "inputs": {
-      "conditioning": ["7", 0]
+      "clip": ["6", 0],
+      "text": "\u62d2\u7edd, \u9650\u5236, \u4e0d\u5e94\u7b54, lowres, error, cropped, worst quality, low quality, jpeg artifacts, heterochromia, out of frame, disfigured, blurry, fat, (ugly:1.3), deformed, mutilated, fingers cut, face cut, head cut, bad anatomy, bad proportions, two heads, two faces, deformed hands, (twisted fingers:1.22), extra fingers, poorly drawn, grainy, poorly drawn face, mutation, poor facial details, cropped head, poorly drawn eyes, unclear eyes, cross-eyes, malformed limbs, poorly drawn hands, fused hands, mutated hands, malformed hands, (mutated fingers:1.4), (fused fingers:1.313), interlocked fingers, extra or missing fingers, (one hand with more than 5 fingers), (one hand with less than 5 fingers), one hand with more than 5 digits, one hand with less than 5 digits, extra digits, fewer digits, bad hair, poorly drawn hair, fused hair, poorly drawn feet, malformed feet, extra or missing feet, fused feet, missing or extra limbs, disfigured, mutilated hands, extra hands, extra arms, extra legs, missing arms, missing hands, missing legs, fingers of different thickness, pointed fingers, thick fingers, (long thumbs:1.35), sharp fingernails, (greyscale:1.3), grain, (monochrome:1.3)"
     }
   },
   "9": {
@@ -63,10 +64,10 @@
     "class_type": "UltimateSDUpscale",
     "inputs": {
       "image": ["1", 0],
-      "model": ["3", 0],
-      "positive": ["6", 0],
+      "model": ["4", 0],
+      "positive": ["7", 0],
       "negative": ["8", 0],
-      "vae": ["4", 0],
+      "vae": ["5", 0],
       "upscale_by": 2.0,
       "seed": 42,
       "steps": 6,
@@ -77,10 +78,10 @@
       "mode_type": "Linear",
       "tile_width": 1024,
       "tile_height": 1024,
-      "mask_blur": 8,
-      "tile_padding": 32,
+      "mask_blur": 16,
+      "tile_padding": 64,
       "seam_fix_mode": "None",
-      "seam_fix_denoise": 0.35,
+      "seam_fix_denoise": 1,
       "seam_fix_width": 64,
       "seam_fix_mask_blur": 8,
       "seam_fix_padding": 16,
@@ -94,6 +95,56 @@
     "inputs": {
       "images": ["10", 0],
       "filename_prefix": "generated/upscaled"
+    }
+  },
+  "12": {
+    "class_type": "llama_cpp_model_loader",
+    "inputs": {
+      "model": "Qwen3-VL-8B-Instruct-abliterated-v2.0.Q4_K_M.gguf",
+      "mmproj": "Qwen3-VL-8B-Instruct-abliterated-v2.0.mmproj-f16.gguf",
+      "mmproj_model": "Qwen3-VL-8B-Instruct-abliterated-v2.0.mmproj-f16.gguf",
+      "chat_handler": "Qwen3-VL",
+      "n_ctx": 8192,
+      "n_gpu_layers": -1,
+      "think_mode": false,
+      "keep_model_loaded": true
+    }
+  },
+  "13": {
+    "class_type": "llama_cpp_parameters",
+    "inputs": {
+      "max_tokens": 1024,
+      "top_k": 30,
+      "top_p": 0.9,
+      "temperature": 0.8,
+      "min_p": 0.05,
+      "typical_p": 1.0,
+      "presence_penalty": 0,
+      "frequency_penalty": 0,
+      "repeat_penalty": 1.1,
+      "tfs_z": 1,
+      "mirostat_mode": 0,
+      "mirostat_tau": 5,
+      "mirostat_eta": 0.1,
+      "image_min_tokens": 256,
+      "image_max_tokens": 1280
+    }
+  },
+  "14": {
+    "class_type": "llama_cpp_instruct_adv",
+    "inputs": {
+      "llamamodel": ["12", 0],
+      "parameters": ["13", 0],
+      "images": ["1", 0],
+      "preset_prompt": "Prompt Style - Extreme Detailed",
+      "input_mode": "one by one",
+      "system_msg": "",
+      "system_prompt": "",
+      "user_msg": "",
+      "custom_prompt": "",
+      "video_size": 256,
+      "max_frames": 24,
+      "seed": 42
     }
   }
 }

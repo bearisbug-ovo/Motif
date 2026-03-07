@@ -16,7 +16,7 @@ MODEL_PARAMS = {
         "scheduler": "simple",
     },
     "base": {
-        "unet_name": "z_image/ZIB-moodyWildMix_v01.safetensors",
+        "unet_name": "z_image\\ZIB-moodyWildMix_v01.safetensors",
         "vae_name": "ae.safetensors",
         "steps": 10,
         "cfg": 1.0,
@@ -132,13 +132,13 @@ class WorkflowBuilder:
     def build_upscale(
         self,
         input_image: str,
-        prompt: str,
         seed: int,
         filename_prefix: str,
         upscale_by: float = 2.0,
         denoise: float = 0.3,
         model: str = "turbo",
         lora_strength: float = 0.7,
+        shift: float = 3.0,
     ) -> dict:
         if seed < 0:
             seed = random.randint(0, 2**32 - 1)
@@ -148,7 +148,7 @@ class WorkflowBuilder:
             "unet_name": mp["unet_name"],
             "vae_name": mp["vae_name"],
             "lora_strength": lora_strength,
-            "positive_prompt": prompt,
+            "shift": shift,
             "seed": seed,
             "upscale_by": upscale_by,
             "steps": 6,
@@ -168,14 +168,15 @@ class WorkflowBuilder:
         seed: int,
         filename_prefix: str,
         denoise: float | None = None,
+        enable_rear_lora: bool = False,
     ) -> dict:
         if seed < 0:
             seed = random.randint(0, 2**32 - 1)
 
         workflow_map = {
-            "flux": ("inpaint_flux.json", 0.45),
+            "flux": ("inpaint_flux.json", 1.0),
             "sdxl": ("inpaint_sdxl.json", 0.50),
-            "klein": ("inpaint_klein.json", 1.0),
+            "klein": ("inpaint_klein.json", 0.45),
         }
         wf_name, default_denoise = workflow_map[mode]
         actual_denoise = denoise if denoise is not None else default_denoise
@@ -183,17 +184,32 @@ class WorkflowBuilder:
         params: dict = {
             "source_image": source_image,
             "mask_image": mask_image,
+            "prompt": prompt,
             "seed": seed,
+            "denoise": actual_denoise,
             "filename_prefix": filename_prefix,
         }
 
-        if mode == "klein":
-            params["prompt"] = prompt
-        else:
-            params["extra_prompt"] = prompt
-            params["denoise"] = actual_denoise
+        # sdxl uses extra_prompt instead of prompt
+        if mode == "sdxl":
+            params["extra_prompt"] = params.pop("prompt")
 
-        return self.build(wf_name, params)
+        wf = self.build(wf_name, params)
+
+        # Dynamically inject rear LoRA node for inpaint_flux
+        if enable_rear_lora and mode == "flux":
+            # Insert LoraLoaderModelOnly between UNETLoader(5) and KSampler(15)
+            wf["19"] = {
+                "class_type": "LoraLoaderModelOnly",
+                "inputs": {
+                    "model": ["5", 0],
+                    "lora_name": "flux-2-kelin\\Klein_9B-\u540e\u4f4d.safetensors",
+                    "strength_model": 1.0,
+                },
+            }
+            wf["15"]["inputs"]["model"] = ["19", 0]
+
+        return wf
 
 
 # Singleton

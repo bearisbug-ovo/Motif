@@ -31,7 +31,11 @@ class ComfyUIClient:
                 f"{self.base_url}/prompt",
                 json=payload,
             ) as resp:
-                resp.raise_for_status()
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise RuntimeError(
+                        f"ComfyUI /prompt returned {resp.status}: {body[:2000]}"
+                    )
                 data = await resp.json()
                 return data["prompt_id"]
 
@@ -75,9 +79,13 @@ class ComfyUIClient:
 
     # ------------------------------------------------------------------ #
     # Get output images for a prompt                                       #
-    # Returns list of (filename, image_bytes)                             #
+    # Returns (saved_outputs, preview_outputs)                             #
+    #   saved: list of (filename, bytes) from SaveImage nodes              #
+    #   preview: list of (filename, bytes) from preview/temp nodes         #
     # ------------------------------------------------------------------ #
-    async def get_output_images(self, prompt_id: str) -> list[tuple[str, bytes]]:
+    async def get_output_images(
+        self, prompt_id: str
+    ) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]]]:
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
             async with session.get(
                 f"{self.base_url}/history/{prompt_id}"
@@ -86,7 +94,8 @@ class ComfyUIClient:
                 history = await resp.json()
 
         outputs = history.get(prompt_id, {}).get("outputs", {})
-        results: list[tuple[str, bytes]] = []
+        saved: list[tuple[str, bytes]] = []
+        preview: list[tuple[str, bytes]] = []
 
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
             for node_output in outputs.values():
@@ -99,9 +108,13 @@ class ComfyUIClient:
                         f"{self.base_url}/view?{params}"
                     ) as img_resp:
                         img_resp.raise_for_status()
-                        results.append((filename, await img_resp.read()))
+                        data = await img_resp.read()
+                        if img_type == "temp":
+                            preview.append((filename, data))
+                        else:
+                            saved.append((filename, data))
 
-        return results
+        return saved, preview
 
     # ------------------------------------------------------------------ #
     # Upload an image to ComfyUI input directory                           #
@@ -147,16 +160,31 @@ class ComfyUIClient:
             await f.write(data)
 
     # ------------------------------------------------------------------ #
-    # High-level: submit → watch → fetch first output image               #
+    # Get all raw outputs for a prompt (images + text + any other data)  #
+    # ------------------------------------------------------------------ #
+    async def get_all_outputs(self, prompt_id: str) -> dict:
+        """Return the raw outputs dict from /history for the given prompt."""
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
+            async with session.get(
+                f"{self.base_url}/history/{prompt_id}"
+            ) as resp:
+                resp.raise_for_status()
+                history = await resp.json()
+        return history.get(prompt_id, {}).get("outputs", {})
+
+    # ------------------------------------------------------------------ #
+    # High-level: submit → watch → fetch output images + prompt_id       #
     # ------------------------------------------------------------------ #
     async def run_workflow(
         self,
         workflow: dict,
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
-    ) -> list[tuple[str, bytes]]:
+    ) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]], str]:
+        """Returns (saved_images, preview_images, prompt_id)."""
         prompt_id = await self.submit(workflow)
         await self.watch_progress_ws(prompt_id, on_progress)
-        return await self.get_output_images(prompt_id)
+        saved, preview = await self.get_output_images(prompt_id)
+        return saved, preview, prompt_id
 
 
 # Singleton for the app lifetime

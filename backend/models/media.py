@@ -21,6 +21,7 @@ class Media(Base):
         Index("ix_media_album_sort", "album_id", "sort_order"),
         Index("ix_media_rating", "rating"),
         Index("ix_media_deleted_at", "is_deleted", "deleted_at"),
+        Index("ix_media_parent", "parent_media_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -32,7 +33,7 @@ class Media(Base):
     parent_media_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     workflow_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     generation_params: Mapped[Optional[str]] = mapped_column(String(5000), nullable=True)  # JSON
-    upscale_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # pending | running | done | failed | skipped
+    video_timestamp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # seconds into source video (for screenshots)
     rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1-5
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     thumbnail_path: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)

@@ -16,8 +16,11 @@ class Settings:
     def __init__(self, data: dict):
         self.appdata_dir = Path(data.get("appdata_dir", str(_DEFAULT_APPDATA)))
         self.comfyui_url: str = data.get("comfyui_url", "http://127.0.0.1:8188")
+        self.comfyui_launch_cmd: str = data.get("comfyui_launch_cmd", "")
         self.thumbnail_size: int = data.get("thumbnail_size", 400)
         self.recycle_bin_days: int = data.get("recycle_bin_days", 30)
+        self.task_timeout_minutes: int = data.get("task_timeout_minutes", 10)
+        self.fastapi_port: int = data.get("fastapi_port", 8000)
 
     # ── Sub-path helpers ──────────────────────────────────────────────────
 
@@ -35,6 +38,9 @@ class Settings:
         base = self.appdata_dir / "imports"
         return base / subtype if subtype else base
 
+    def masks_dir(self) -> Path:
+        return self.appdata_dir / "cache" / "masks"
+
     def poses_dir(self) -> Path:
         return self.appdata_dir / "poses"
 
@@ -49,8 +55,11 @@ class Settings:
         return {
             "appdata_dir": str(self.appdata_dir),
             "comfyui_url": self.comfyui_url,
+            "comfyui_launch_cmd": self.comfyui_launch_cmd,
             "thumbnail_size": self.thumbnail_size,
             "recycle_bin_days": self.recycle_bin_days,
+            "task_timeout_minutes": self.task_timeout_minutes,
+            "fastapi_port": self.fastapi_port,
         }
 
 
@@ -70,8 +79,10 @@ def _ensure_dirs(settings: Settings) -> None:
         settings.generated_dir("portrait"),
         settings.generated_dir("screenshot"),
         settings.imports_dir("clipboard"),
+        settings.masks_dir(),
         settings.poses_dir(),
         settings.workflows_dir(),
+        settings.downloads_dir("xiaohongshu"),
     ]:
         d.mkdir(parents=True, exist_ok=True)
 

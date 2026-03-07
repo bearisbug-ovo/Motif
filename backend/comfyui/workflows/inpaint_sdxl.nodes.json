@@ -1,8 +1,8 @@
 {
   "source_image":    {"node_id": "1",  "key": "image"},
   "mask_image":      {"node_id": "2",  "key": "image"},
-  "extra_prompt":    {"node_id": "7",  "key": "text"},
-  "seed":            {"node_id": "10", "key": "seed"},
-  "denoise":         {"node_id": "10", "key": "denoise"},
-  "filename_prefix": {"node_id": "14", "key": "filename_prefix"}
+  "extra_prompt":    {"node_id": "6",  "key": "prompt"},
+  "seed":            {"node_id": "12", "key": "seed"},
+  "denoise":         {"node_id": "12", "key": "denoise"},
+  "filename_prefix": {"node_id": "17", "key": "filename_prefix"}
 }
