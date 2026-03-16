@@ -6,5 +6,6 @@ from .workspace import WorkspaceItem
 from .platform_account import PlatformAccount
 from .download_record import DownloadRecord
 from .workflow import Workflow
+from .tag import Tag, person_tags, album_tags
 
-__all__ = ["Person", "Album", "Media", "Task", "QueueConfig", "WorkspaceItem", "PlatformAccount", "DownloadRecord", "Workflow"]
+__all__ = ["Person", "Album", "Media", "Task", "QueueConfig", "WorkspaceItem", "PlatformAccount", "DownloadRecord", "Workflow", "Tag", "person_tags", "album_tags"]

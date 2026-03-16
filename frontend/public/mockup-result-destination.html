@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ResultDestination UI Mockup</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --background: hsl(45 5% 16%);
+    --foreground: hsl(40 17% 92%);
+    --card: hsl(48 5% 20%);
+    --primary: hsl(24 57% 62%);
+    --primary-foreground: hsl(45 5% 10%);
+    --muted: hsl(48 5% 22%);
+    --muted-foreground: hsl(40 7% 50%);
+    --accent: hsl(45 5% 23%);
+    --border: hsl(50 5% 23%);
+    --input: hsl(50 5% 23%);
+    --destructive: hsl(0 63% 40%);
+    --ring: hsl(24 57% 62%);
+    --step1: hsl(210 60% 55%);
+    --step2: hsl(280 50% 55%);
+    --step3: hsl(160 50% 45%);
+  }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--background); color: var(--foreground);
+    padding: 16px; line-height: 1.5;
+  }
+  h1 { font-size: 16px; font-weight: 600; color: var(--muted-foreground); margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+  h2 { font-size: 12px; font-weight: 500; color: var(--muted-foreground); margin: 32px 0 12px; text-transform: uppercase; letter-spacing: 1.5px; }
+  .mockup-container { max-width: 520px; margin: 0 auto 48px; }
+
+  /* ── Editor frame ── */
+  .editor-frame { background: rgba(0,0,0,0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow: hidden; }
+  .toolbar { display: flex; align-items: center; gap: 6px; padding: 10px 12px; background: rgba(0,0,0,0.8); border-bottom: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; }
+  .toolbar-label { color: rgba(255,255,255,0.7); font-size: 14px; margin-right: 2px; }
+  .aspect-btn { padding: 4px 8px; font-size: 12px; border-radius: 6px; border: none; cursor: pointer; color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.1); font-family: inherit; }
+  .aspect-btn.active { background: var(--primary); color: var(--primary-foreground); }
+  .toolbar-right { margin-left: auto; display: flex; gap: 4px; }
+  .ghost-btn { padding: 6px 10px; font-size: 14px; border-radius: 6px; border: none; cursor: pointer; font-family: inherit; background: transparent; color: rgba(255,255,255,0.7); display: inline-flex; align-items: center; gap: 4px; }
+  .ghost-btn:hover { color: white; background: rgba(255,255,255,0.1); }
+  .content-area { height: 140px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.15); font-size: 14px; background: #111; }
+
+  /* ── ResultDestination ── */
+  .result-destination { padding: 10px 12px; background: rgba(255,255,255,0.03); border-top: 1px solid rgba(255,255,255,0.08); }
+  .rd-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .rd-field { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 140px; }
+  .rd-label { font-size: 13px; color: rgba(255,255,255,0.5); white-space: nowrap; }
+  .rd-select { flex: 1; padding: 5px 26px 5px 8px; font-size: 13px; font-family: inherit; background: rgba(255,255,255,0.06); color: var(--foreground); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; outline: none; min-width: 0; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; height: 32px; }
+  .rd-select:focus { border-color: var(--ring); box-shadow: 0 0 0 2px hsla(24,57%,62%,0.15); }
+
+  .rd-location-trigger { flex: 1; min-width: 140px; padding: 5px 8px; font-size: 13px; font-family: inherit; background: rgba(255,255,255,0.06); color: var(--foreground); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 32px; text-align: left; }
+  .rd-location-trigger:hover { border-color: rgba(255,255,255,0.25); }
+  .rd-location-trigger .loc-person { color: var(--muted-foreground); font-size: 12px; }
+  .rd-location-trigger .loc-album { flex: 1; }
+  .rd-location-trigger .loc-arrow { color: var(--muted-foreground); font-size: 10px; margin-left: auto; }
+
+  .rd-chain-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .rd-checkbox { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+  .rd-chain-label { font-size: 13px; color: rgba(255,255,255,0.5); cursor: pointer; }
+  .rd-chain-select { padding: 3px 24px 3px 8px; font-size: 12px; font-family: inherit; background: rgba(255,255,255,0.06); color: var(--foreground); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 5px center; height: 26px; }
+
+  /* ── Action bar ── */
+  .action-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: rgba(0,0,0,0.8); border-top: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; gap: 8px; }
+  .action-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .btn-primary { padding: 7px 14px; font-size: 14px; border-radius: 6px; border: none; cursor: pointer; font-family: inherit; font-weight: 500; background: var(--primary); color: var(--primary-foreground); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .btn-primary:hover { filter: brightness(0.9); }
+  .btn-outline { padding: 7px 14px; font-size: 14px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-family: inherit; background: transparent; color: var(--foreground); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .btn-outline:hover { background: var(--accent); }
+  .overwrite-label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: rgba(255,255,255,0.7); cursor: pointer; white-space: nowrap; }
+
+  /* ── Dialog ── */
+  .dialog-frame { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; max-width: 480px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.3); }
+  .dialog-header { padding: 20px 20px 10px; font-size: 18px; font-weight: 600; }
+  .dialog-body { padding: 0 20px 16px; }
+  .dialog-section { margin-bottom: 14px; }
+  .source-preview { display: flex; align-items: center; gap: 12px; padding: 8px; background: var(--muted); border-radius: 8px; }
+  .source-thumb { width: 56px; height: 56px; border-radius: 6px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 20px; }
+  .source-info { font-size: 14px; min-width: 0; }
+  .source-info .filename { color: var(--muted-foreground); }
+  .source-info .dim { font-size: 12px; color: var(--muted-foreground); margin-top: 2px; }
+  .form-field { margin-bottom: 10px; }
+  .form-label { font-size: 14px; font-weight: 500; margin-bottom: 4px; display: block; }
+  .form-sublabel { font-size: 14px; color: var(--muted-foreground); margin-bottom: 4px; display: block; }
+  .dialog-select { width: 100%; padding: 7px 30px 7px 10px; font-size: 14px; font-family: inherit; background: var(--background); color: var(--foreground); border: 1px solid var(--input); border-radius: 6px; appearance: none; outline: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; height: 38px; }
+  .dialog-select:focus { border-color: var(--ring); }
+  .dialog-input { width: 100%; padding: 7px 10px; font-size: 14px; font-family: inherit; background: var(--background); color: var(--foreground); border: 1px solid var(--input); border-radius: 6px; outline: none; height: 38px; }
+  .dialog-input:focus { border-color: var(--ring); }
+  .param-image-preview { display: flex; align-items: center; gap: 8px; padding: 8px; background: var(--muted); border-radius: 6px; }
+  .param-thumb { width: 32px; height: 32px; border-radius: 4px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 14px; flex-shrink: 0; }
+  .param-auto { font-size: 13px; color: var(--muted-foreground); flex: 1; min-width: 0; }
+  .param-crop-btn { padding: 4px 6px; background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; font-size: 14px; font-family: inherit; border-radius: 4px; flex-shrink: 0; }
+  .param-crop-btn:hover { background: var(--accent); color: var(--foreground); }
+
+  /* ResultDestination in dialog */
+  .rd-dialog { padding: 12px; background: hsla(24,57%,62%,0.06); border: 1px solid hsla(24,57%,62%,0.15); border-radius: 8px; margin-top: 4px; }
+  .rd-dialog .rd-row { gap: 8px; }
+  .rd-dialog .rd-location-trigger { background: var(--background); border-color: var(--input); }
+  .rd-dialog .rd-chain-row { margin-top: 8px; }
+  .rd-dialog .rd-chain-label { color: var(--muted-foreground); }
+  .rd-dialog .rd-checkbox { accent-color: var(--primary); }
+  .rd-section-label { font-size: 13px; color: var(--primary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; font-weight: 500; }
+
+  .dialog-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px 20px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .chain-link-btn { margin-right: auto; padding: 6px 10px; font-size: 14px; background: transparent; border: none; font-family: inherit; color: var(--primary); cursor: pointer; display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .separator { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+  .note { background: hsla(24,30%,15%,0.5); border: 1px solid hsla(24,30%,30%,0.3); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: var(--muted-foreground); margin-top: 10px; line-height: 1.8; }
+  .note strong { color: var(--foreground); }
+  .hidden-note { text-align: center; padding: 10px; font-size: 12px; color: var(--muted-foreground); font-style: italic; }
+
+  /* Timeline */
+  .timeline-bar { position: relative; height: 40px; background: rgba(255,255,255,0.1); border-radius: 8px; }
+  .timeline-range { position: absolute; top: 0; bottom: 0; background: hsla(24,57%,62%,0.25); border-radius: 4px; }
+  .timeline-handle { position: absolute; top: 50%; transform: translate(-50%,-50%); width: 18px; height: 32px; background: var(--primary); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: ew-resize; }
+  .timeline-handle-line { width: 2px; height: 14px; background: rgba(0,0,0,0.3); border-radius: 1px; }
+  .timeline-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: white; pointer-events: none; }
+  .swap-btn { width: 100%; padding: 6px; font-size: 13px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-family: inherit; background: transparent; color: var(--foreground); display: flex; align-items: center; justify-content: center; gap: 6px; margin-bottom: 12px; }
+  .swap-btn:hover { background: var(--accent); }
+
+  /* ── Picker ── */
+  .picker-overlay { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.3); }
+  .picker-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 12px; border-bottom: 1px solid var(--border); }
+  .picker-header h3 { font-size: 16px; font-weight: 600; }
+  .picker-close { width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; font-family: inherit; }
+  .picker-close:hover { background: var(--accent); }
+  .picker-search { margin: 12px 16px 8px; width: calc(100% - 32px); padding: 7px 10px 7px 32px; font-size: 14px; font-family: inherit; background: var(--background); color: var(--foreground); border: 1px solid var(--input); border-radius: 6px; outline: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.3-4.3'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 10px center; }
+  .picker-search:focus { border-color: var(--ring); }
+  .picker-body { padding: 4px 8px 8px; max-height: 360px; overflow-y: auto; }
+  .picker-section-label { font-size: 11px; font-weight: 500; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 8px 4px; }
+  .picker-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; cursor: pointer; transition: background 0.1s; }
+  .picker-item:hover { background: var(--accent); }
+  .picker-item.selected { background: hsla(24,57%,62%,0.12); outline: 1px solid hsla(24,57%,62%,0.3); }
+  .picker-item-thumb { width: 40px; height: 40px; border-radius: 6px; background: var(--accent); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--muted-foreground); }
+  .picker-item-info { flex: 1; min-width: 0; }
+  .picker-item-name { font-size: 14px; font-weight: 500; }
+  .picker-item-meta { font-size: 12px; color: var(--muted-foreground); }
+  .picker-item-check { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; }
+  .picker-item.selected .picker-item-check { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+  .picker-create-btn { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; color: var(--primary); font-size: 14px; border: 1px dashed hsla(24,57%,62%,0.3); background: transparent; width: 100%; font-family: inherit; margin-top: 4px; }
+  .picker-create-btn:hover { background: hsla(24,57%,62%,0.06); }
+  .picker-breadcrumb { display: flex; align-items: center; gap: 4px; padding: 8px 16px; font-size: 13px; color: var(--muted-foreground); }
+  .picker-breadcrumb a { color: var(--primary); text-decoration: none; cursor: pointer; }
+  .picker-breadcrumb a:hover { text-decoration: underline; }
+  .picker-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+
+  /* Batch */
+  .batch-summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--muted); border-radius: 8px; font-size: 14px; flex-wrap: wrap; }
+  .batch-count { display: inline-flex; align-items: center; justify-content: center; padding: 2px 10px; border-radius: 12px; background: var(--primary); color: var(--primary-foreground); font-size: 13px; font-weight: 600; }
+
+  /* ── Composite step blocks ── */
+  .step-block { border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+  .step-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; user-select: none; }
+  .step-header:hover { filter: brightness(1.1); }
+  .step-badge { font-size: 12px; font-weight: 600; color: white; padding: 1px 8px; border-radius: 4px; }
+  .step-name { font-size: 14px; font-weight: 500; flex: 1; }
+  .step-toggle { font-size: 12px; color: inherit; opacity: 0.6; transition: transform 0.2s; }
+  .step-toggle.open { transform: rotate(90deg); }
+  .step-body { padding: 4px 12px 12px; }
+
+  .step-block.step-1 { background: hsla(210,60%,55%,0.08); border: 1px solid hsla(210,60%,55%,0.2); }
+  .step-block.step-1 .step-header { color: hsl(210,60%,70%); }
+  .step-block.step-1 .step-badge { background: var(--step1); }
+  .step-block.step-2 { background: hsla(280,50%,55%,0.08); border: 1px solid hsla(280,50%,55%,0.2); }
+  .step-block.step-2 .step-header { color: hsl(280,50%,70%); }
+  .step-block.step-2 .step-badge { background: var(--step2); }
+  .step-block.step-3 { background: hsla(160,50%,45%,0.08); border: 1px solid hsla(160,50%,45%,0.2); }
+  .step-block.step-3 .step-header { color: hsl(160,50%,65%); }
+  .step-block.step-3 .step-badge { background: var(--step3); }
+
+  /* Locked/chain-input param indicator */
+  .param-locked {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-radius: 6px;
+    background: repeating-linear-gradient(135deg, transparent, transparent 8px, hsla(0,0%,50%,0.03) 8px, hsla(0,0%,50%,0.03) 16px);
+    border: 1px dashed hsla(0,0%,50%,0.2);
+    color: var(--muted-foreground); font-size: 13px;
+  }
+  .param-locked-icon { font-size: 14px; flex-shrink: 0; }
+  .param-locked-text { flex: 1; }
+  .param-locked-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+  .step-1 .param-locked-badge { background: hsla(210,60%,55%,0.2); color: hsl(210,60%,70%); }
+  .step-2 .param-locked-badge { background: hsla(280,50%,55%,0.2); color: hsl(280,50%,70%); }
+
+  /* Batch auto-fill indicator */
+  .param-batch-fill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-radius: 6px;
+    background: hsla(24,57%,62%,0.06);
+    border: 1px dashed hsla(24,57%,62%,0.25);
+    color: var(--muted-foreground); font-size: 13px;
+  }
+  .param-batch-fill-icon { font-size: 14px; flex-shrink: 0; }
+  .param-batch-fill-text { flex: 1; }
+  .param-batch-fill-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap; background: hsla(24,57%,62%,0.15); color: var(--primary); }
+
+  /* ── Mobile ── */
+  @media (max-width: 480px) {
+    body { padding: 8px; }
+    .mockup-container { max-width: 100%; }
+    .toolbar { padding: 8px 10px; gap: 4px; }
+    .aspect-btn { padding: 4px 6px; font-size: 11px; }
+    .toolbar-right { margin-left: 0; width: 100%; justify-content: flex-end; margin-top: 4px; }
+    .rd-field { min-width: 100%; }
+    .rd-row { gap: 6px; }
+    .action-bar { padding: 8px 10px; }
+    .action-right { width: 100%; justify-content: flex-end; }
+    .dialog-frame { max-width: 100%; }
+    .dialog-header { padding: 16px 16px 8px; font-size: 16px; }
+    .dialog-body { padding: 0 16px 12px; }
+    .dialog-footer { padding: 10px 16px 16px; flex-direction: column-reverse; }
+    .dialog-footer .btn-primary, .dialog-footer .btn-outline { width: 100%; justify-content: center; }
+    .chain-link-btn { margin-right: 0; width: 100%; justify-content: center; }
+    .source-thumb { width: 48px; height: 48px; }
+    .picker-body { max-height: 50vh; }
+    .step-body .form-field { margin-bottom: 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="mockup-container">
+  <h1>ResultDestination 统一结果归属配置 — UI Mockup</h1>
+
+  <!-- ===== 1. CropEditor ===== -->
+  <h2>1. CropEditor — 图片裁剪</h2>
+  <div class="editor-frame">
+    <div class="toolbar">
+      <span class="toolbar-label">宽高比:</span>
+      <button class="aspect-btn active">自由</button>
+      <button class="aspect-btn">1:1</button>
+      <button class="aspect-btn">4:3</button>
+      <button class="aspect-btn">16:9</button>
+      <button class="aspect-btn">3:4</button>
+      <button class="aspect-btn">9:16</button>
+      <div class="toolbar-right">
+        <button class="ghost-btn">↻ 旋转</button>
+        <button class="ghost-btn">↺ 重置</button>
+      </div>
+    </div>
+    <div class="content-area">[裁剪区域]</div>
+    <div class="result-destination">
+      <div class="rd-row">
+        <span class="rd-label">保存到:</span>
+        <button class="rd-location-trigger">
+          <span class="loc-person">刘亦菲</span>
+          <span style="color:var(--muted-foreground);">/</span>
+          <span class="loc-album">写真 Vol.3</span>
+          <span class="loc-arrow">▾</span>
+        </button>
+      </div>
+      <div class="rd-chain-row">
+        <input type="checkbox" class="rd-checkbox" id="c1">
+        <label class="rd-chain-label" for="c1">关联原图（生成链）</label>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button class="ghost-btn">✕ 取消</button>
+      <div class="action-right">
+        <label class="overwrite-label"><input type="checkbox"> 覆盖原图</label>
+        <button class="btn-primary">✓ 确认裁剪</button>
+      </div>
+    </div>
+  </div>
+  <div class="note">
+    <strong>裁剪默认值：</strong>位置继承源媒体，生成链 <strong>☐ 默认关闭</strong><br>
+    隐藏条件：mode='temp' 或勾选「覆盖原图」
+  </div>
+
+  <!-- ===== 2. CropEditor 覆盖 ===== -->
+  <h2>2. CropEditor — 覆盖原图</h2>
+  <div class="editor-frame">
+    <div class="toolbar">
+      <span class="toolbar-label">宽高比:</span>
+      <button class="aspect-btn active">自由</button>
+      <button class="aspect-btn">1:1</button>
+      <button class="aspect-btn">4:3</button>
+      <button class="aspect-btn">16:9</button>
+      <div class="toolbar-right">
+        <button class="ghost-btn">↻ 旋转</button>
+        <button class="ghost-btn">↺ 重置</button>
+      </div>
+    </div>
+    <div class="content-area">[裁剪区域]</div>
+    <div class="hidden-note">— 覆盖原图：不改变归属，保存选项已隐藏 —</div>
+    <div class="action-bar">
+      <button class="ghost-btn">✕ 取消</button>
+      <div class="action-right">
+        <label class="overwrite-label"><input type="checkbox" checked> 覆盖原图</label>
+        <button class="btn-primary">✓ 确认裁剪</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 3. VideoTrimEditor ===== -->
+  <h2>3. VideoTrimEditor — 视频剪辑</h2>
+  <div class="editor-frame">
+    <div class="toolbar">
+      <span style="color:rgba(255,255,255,0.7);font-size:14px;">已选择: 1:23.4 <span style="color:rgba(255,255,255,0.4);margin-left:10px;">0:15.2 — 1:38.6</span></span>
+      <div class="toolbar-right">
+        <button class="ghost-btn">⏮</button>
+        <button class="ghost-btn" style="font-size:18px;">▶</button>
+        <button class="ghost-btn">⏭</button>
+      </div>
+    </div>
+    <div class="content-area">[视频预览]</div>
+    <div style="padding:14px 20px;background:rgba(0,0,0,0.8);">
+      <div class="timeline-bar">
+        <div class="timeline-range" style="left:10%;width:70%;"></div>
+        <div class="timeline-handle" style="left:10%;"><div class="timeline-handle-line"></div></div>
+        <div class="timeline-handle" style="left:80%;"><div class="timeline-handle-line"></div></div>
+        <div class="timeline-playhead" style="left:45%;"></div>
+      </div>
+    </div>
+    <div class="result-destination">
+      <div class="rd-row">
+        <span class="rd-label">保存到:</span>
+        <button class="rd-location-trigger">
+          <span class="loc-person">刘亦菲</span>
+          <span style="color:var(--muted-foreground);">/</span>
+          <span class="loc-album">写真 Vol.3</span>
+          <span class="loc-arrow">▾</span>
+        </button>
+      </div>
+      <div class="rd-chain-row">
+        <input type="checkbox" class="rd-checkbox" id="c2">
+        <label class="rd-chain-label" for="c2">关联原图（生成链）</label>
+      </div>
+    </div>
+    <div class="action-bar">
+      <button class="ghost-btn">✕ 取消</button>
+      <div class="action-right">
+        <label class="overwrite-label"><input type="checkbox"> 精确裁剪 (重编码)</label>
+        <button class="btn-primary">✓ 保存</button>
+      </div>
+    </div>
+  </div>
+  <div class="note"><strong>视频剪辑：</strong>位置继承源媒体，生成链 <strong>☐ 默认关闭</strong></div>
+
+  <!-- ===== 4. MediaDestinationPicker ===== -->
+  <h2>4. MediaDestinationPicker — 位置选择器</h2>
+  <p style="font-size:12px;color:var(--muted-foreground);margin-bottom:12px;">点击「保存到」按钮后弹出。也可用于移动到图集等场景。</p>
+
+  <!-- State 1: Person list -->
+  <div class="picker-overlay" style="margin-bottom:16px;">
+    <div class="picker-header">
+      <h3>选择位置</h3>
+      <button class="picker-close">✕</button>
+    </div>
+    <input class="picker-search" placeholder="搜索人物或图集...">
+    <div class="picker-body">
+      <div class="picker-section-label">人物</div>
+      <div class="picker-item selected">
+        <div class="picker-item-thumb">👤</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name">刘亦菲</div>
+          <div class="picker-item-meta">12 个图集 · 238 张</div>
+        </div>
+        <span style="color:var(--primary);font-size:12px;">▸</span>
+      </div>
+      <div class="picker-item">
+        <div class="picker-item-thumb">👤</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name">赵丽颖</div>
+          <div class="picker-item-meta">8 个图集 · 156 张</div>
+        </div>
+        <span style="color:var(--muted-foreground);font-size:12px;">▸</span>
+      </div>
+      <div class="picker-item">
+        <div class="picker-item-thumb">👤</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name">杨幂</div>
+          <div class="picker-item-meta">5 个图集 · 89 张</div>
+        </div>
+        <span style="color:var(--muted-foreground);font-size:12px;">▸</span>
+      </div>
+      <div class="picker-section-label" style="margin-top:8px;">快捷</div>
+      <div class="picker-item">
+        <div class="picker-item-thumb" style="font-size:14px;">📁</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name" style="color:var(--muted-foreground);">未分类</div>
+          <div class="picker-item-meta">不归属任何人物</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- State 2: Album list under person -->
+  <div class="picker-overlay">
+    <div class="picker-header">
+      <h3>选择位置</h3>
+      <button class="picker-close">✕</button>
+    </div>
+    <div class="picker-breadcrumb">
+      <a>人物</a>
+      <span style="color:var(--muted-foreground);">›</span>
+      <span>刘亦菲</span>
+    </div>
+    <div class="picker-body">
+      <div class="picker-item">
+        <div class="picker-item-thumb" style="font-size:14px;">📂</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name" style="color:var(--muted-foreground);">未分类</div>
+          <div class="picker-item-meta">不归属任何图集</div>
+        </div>
+        <div class="picker-item-check"></div>
+      </div>
+      <div class="picker-section-label">图集</div>
+      <div class="picker-item selected">
+        <div class="picker-item-thumb">🖼</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name">写真 Vol.3</div>
+          <div class="picker-item-meta">42 张</div>
+        </div>
+        <div class="picker-item-check">✓</div>
+      </div>
+      <div class="picker-item">
+        <div class="picker-item-thumb">🖼</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name">换脸合集</div>
+          <div class="picker-item-meta">18 张 · AI 图集</div>
+        </div>
+        <div class="picker-item-check"></div>
+      </div>
+      <div class="picker-item">
+        <div class="picker-item-thumb">🖼</div>
+        <div class="picker-item-info">
+          <div class="picker-item-name">写真 Vol.2</div>
+          <div class="picker-item-meta">67 张</div>
+        </div>
+        <div class="picker-item-check"></div>
+      </div>
+      <button class="picker-create-btn">
+        <span style="font-size:16px;">+</span> 新建图集
+      </button>
+    </div>
+    <div class="picker-footer">
+      <button class="btn-outline" style="padding:6px 12px;font-size:13px;">取消</button>
+      <button class="btn-primary" style="padding:6px 12px;font-size:13px;">确定</button>
+    </div>
+  </div>
+  <div class="note">
+    <strong>MediaDestinationPicker</strong> 通用位置选择器<br>
+    • 两级导航：人物 → 图集/未分类<br>
+    • 支持搜索、新建图集<br>
+    • 可复用：ResultDestination / 移动到图集 / 批量移动
+  </div>
+
+  <!-- ===== 5. WorkflowRunDialog 单图 ===== -->
+  <h2>5. WorkflowRunDialog — 高清放大</h2>
+  <div class="dialog-frame">
+    <div class="dialog-header">高清放大</div>
+    <div class="dialog-body">
+      <div class="dialog-section">
+        <div class="source-preview">
+          <div class="source-thumb">🖼</div>
+          <div class="source-info"><div class="filename">photo_001.jpg</div><div class="dim">1920 × 1080</div></div>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">工作流</label>
+        <select class="dialog-select"><option>4x-Ultrasharp (默认)</option></select>
+      </div>
+      <div class="form-field">
+        <label class="form-sublabel">原图</label>
+        <div class="param-image-preview">
+          <div class="param-thumb">🖼</div>
+          <span class="param-auto">已自动填入</span>
+          <button class="param-crop-btn">✂</button>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-sublabel">放大倍数</label>
+        <input class="dialog-input" type="number" value="2">
+      </div>
+      <hr class="separator">
+      <div class="rd-dialog">
+        <div class="rd-section-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          结果保存到
+        </div>
+        <div class="rd-row">
+          <button class="rd-location-trigger">
+            <span class="loc-person">刘亦菲</span><span style="color:var(--muted-foreground);">/</span>
+            <span class="loc-album">写真 Vol.3</span><span class="loc-arrow">▾</span>
+          </button>
+        </div>
+        <div class="rd-chain-row">
+          <input type="checkbox" class="rd-checkbox" id="c3" checked>
+          <label class="rd-chain-label" for="c3">关联原图（生成链）</label>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="chain-link-btn">🔗 链接下一步</button>
+      <button class="btn-outline">加入队列</button>
+      <button class="btn-primary">立即执行</button>
+    </div>
+  </div>
+  <div class="note"><strong>单图 AI 工作流：</strong>生成链 ☑ 默认开启，位置继承源媒体</div>
+
+  <!-- ===== 6. WorkflowRunDialog 换脸 ===== -->
+  <h2>6. WorkflowRunDialog — 换脸（多原图）</h2>
+  <div class="dialog-frame">
+    <div class="dialog-header">换脸</div>
+    <div class="dialog-body">
+      <div class="dialog-section">
+        <div class="source-preview">
+          <div class="source-thumb">🖼</div>
+          <div class="source-info"><div class="filename">photo_001.jpg</div><div class="dim">1920 × 1080</div></div>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">工作流</label>
+        <select class="dialog-select"><option>Kontext Q4 换脸 (默认)</option></select>
+      </div>
+      <div class="form-field">
+        <label class="form-sublabel">底图</label>
+        <div class="param-image-preview">
+          <div class="param-thumb">🖼</div><span class="param-auto">已自动填入</span>
+          <button class="param-crop-btn">✂</button>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-sublabel">人脸参考 <span style="color:var(--destructive);">*</span></label>
+        <div class="param-image-preview">
+          <div class="param-thumb">👤</div>
+          <span class="param-auto" style="color:var(--foreground);">face_ref_002.jpg</span>
+          <button class="param-crop-btn">✂</button>
+          <button class="param-crop-btn">✕</button>
+        </div>
+      </div>
+      <button class="swap-btn">↕ 交换底图和人脸参考</button>
+      <hr class="separator">
+      <div class="rd-dialog">
+        <div class="rd-section-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          结果保存到
+        </div>
+        <div class="rd-row">
+          <button class="rd-location-trigger">
+            <span class="loc-person">赵丽颖</span><span style="color:var(--muted-foreground);">/</span>
+            <span class="loc-album">换脸合集</span><span class="loc-arrow">▾</span>
+          </button>
+        </div>
+        <div class="rd-chain-row">
+          <span class="rd-chain-label">关联原图:</span>
+          <select class="rd-chain-select">
+            <option>人脸参考 — face_ref_002.jpg</option>
+            <option>底图 — photo_001.jpg</option>
+            <option>不关联</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="chain-link-btn">🔗 链接下一步</button>
+      <button class="btn-outline">加入队列</button>
+      <button class="btn-primary">立即执行</button>
+    </div>
+  </div>
+  <div class="note">
+    <strong>换脸：</strong>位置默认人脸参考的人物/图集，生成链默认关联 <strong>人脸参考</strong>
+  </div>
+
+  <!-- ===== 7. BatchAiDialog ===== -->
+  <h2>7. BatchAiDialog — 批量生成</h2>
+  <div class="dialog-frame">
+    <div class="dialog-header">批量高清放大</div>
+    <div class="dialog-body">
+      <div class="dialog-section">
+        <div class="batch-summary">
+          <span class="batch-count">24</span><span>张图片将被处理</span>
+          <span style="font-size:12px;color:var(--muted-foreground);margin-left:auto;">跳过 3 张 AI 图</span>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">工作流</label>
+        <select class="dialog-select"><option>4x-Ultrasharp (默认)</option></select>
+      </div>
+      <div class="form-field">
+        <label class="form-sublabel">原图</label>
+        <div class="param-batch-fill">
+          <span class="param-batch-fill-icon">📋</span>
+          <span class="param-batch-fill-text">逐张自动填入（共 24 张）</span>
+          <span class="param-batch-fill-badge">批量</span>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-sublabel">放大倍数</label>
+        <input class="dialog-input" type="number" value="2">
+      </div>
+      <hr class="separator">
+      <div class="rd-dialog">
+        <div class="rd-section-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          结果保存到
+        </div>
+        <div class="rd-row">
+          <button class="rd-location-trigger">
+            <span class="loc-album" style="color:var(--muted-foreground);">跟随原图</span>
+            <span class="loc-arrow">▾</span>
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--muted-foreground);margin-top:4px;padding-left:2px;">每张结果保存到源图所在位置，也可统一指定</div>
+        <div class="rd-chain-row">
+          <input type="checkbox" class="rd-checkbox" id="c4" checked>
+          <label class="rd-chain-label" for="c4">关联原图（生成链）</label>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="btn-outline">加入队列</button>
+      <button class="btn-primary">立即执行</button>
+    </div>
+  </div>
+  <div class="note"><strong>批量模式：</strong>源图参数用橙色虚线框标示「批量自动填入」，与普通/复合模式保持统一的参数表单结构</div>
+
+  <!-- ===== 8. 复合工作流 — 分步参数展开 ===== -->
+  <h2>8. 复合工作流 — 分步参数配置</h2>
+  <div class="dialog-frame">
+    <div class="dialog-header">放大 + 换脸</div>
+    <div class="dialog-body">
+      <div class="dialog-section">
+        <div class="source-preview">
+          <div class="source-thumb">🖼</div>
+          <div class="source-info"><div class="filename">photo_001.jpg</div><div class="dim">1920 × 1080</div></div>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label class="form-label">工作流</label>
+        <select class="dialog-select"><option>放大 + 换脸 (复合)</option></select>
+      </div>
+
+      <!-- Step 1: 展开状态 -->
+      <div class="step-block step-1">
+        <div class="step-header">
+          <span class="step-badge">步骤 1</span>
+          <span class="step-name">4x-Ultrasharp</span>
+          <span class="step-toggle open">▸</span>
+        </div>
+        <div class="step-body">
+          <div class="form-field">
+            <label class="form-sublabel">原图</label>
+            <div class="param-image-preview">
+              <div class="param-thumb">🖼</div>
+              <span class="param-auto">已自动填入</span>
+              <button class="param-crop-btn">✂</button>
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-sublabel">放大倍数</label>
+            <input class="dialog-input" type="number" value="2">
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: 默认收起 -->
+      <div class="step-block step-2">
+        <div class="step-header">
+          <span class="step-badge">步骤 2</span>
+          <span class="step-name">Kontext Q4 换脸</span>
+          <span class="step-toggle">▸</span>
+        </div>
+        <!-- 默认收起，点击展开后显示以下内容 -->
+      </div>
+
+      <div style="font-size:12px;color:var(--muted-foreground);margin:8px 0;font-style:italic;">↓ 步骤 2 展开后效果 ↓</div>
+
+      <div class="step-block step-2">
+        <div class="step-header">
+          <span class="step-badge">步骤 2</span>
+          <span class="step-name">Kontext Q4 换脸</span>
+          <span class="step-toggle open">▸</span>
+        </div>
+        <div class="step-body">
+          <div class="form-field">
+            <label class="form-sublabel">底图</label>
+            <div class="param-locked">
+              <span class="param-locked-icon">🔗</span>
+              <span class="param-locked-text">自动接收步骤 1 的输出</span>
+              <span class="param-locked-badge">← 步骤 1</span>
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-sublabel">人脸参考 <span style="color:var(--destructive);">*</span></label>
+            <div class="param-image-preview">
+              <div class="param-thumb">👤</div>
+              <span class="param-auto" style="color:var(--foreground);">face_ref_002.jpg</span>
+              <button class="param-crop-btn">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <hr class="separator">
+
+      <div class="rd-dialog">
+        <div class="rd-section-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          最终结果保存到
+        </div>
+        <div class="rd-row">
+          <button class="rd-location-trigger">
+            <span class="loc-person">赵丽颖</span><span style="color:var(--muted-foreground);">/</span>
+            <span class="loc-album">换脸合集</span><span class="loc-arrow">▾</span>
+          </button>
+        </div>
+        <div class="rd-chain-row">
+          <input type="checkbox" class="rd-checkbox" id="c5" checked>
+          <label class="rd-chain-label" for="c5">关联原图（生成链）</label>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="btn-outline">加入队列</button>
+      <button class="btn-primary">立即执行</button>
+    </div>
+  </div>
+  <div class="note">
+    <strong>复合工作流设计：</strong><br>
+    • 每个步骤用<strong>彩色区块</strong>标识（蓝/紫/绿...），第一步默认展开，后续默认收起<br>
+    • 接收上一步输出的参数用<strong>锁定样式</strong>（虚线框 + 🔗 + 来源标签），用户一眼可知该输入不可编辑<br>
+    • 点击步骤标题栏可展开/收起参数<br>
+    • ResultDestination 标题为「最终结果保存到」
+  </div>
+
+  <!-- ===== 9. 复合工作流 — 步骤收起状态 ===== -->
+  <h2>9. 复合工作流 — 步骤收起</h2>
+  <div class="dialog-frame" style="padding: 20px;">
+    <div style="font-size:13px;color:var(--muted-foreground);margin-bottom:10px;">步骤 2 收起时的效果：</div>
+
+    <div class="step-block step-1">
+      <div class="step-header">
+        <span class="step-badge">步骤 1</span>
+        <span class="step-name">4x-Ultrasharp</span>
+        <span class="step-toggle open">▸</span>
+      </div>
+      <div class="step-body">
+        <div class="form-field">
+          <label class="form-sublabel">放大倍数</label>
+          <input class="dialog-input" type="number" value="2">
+        </div>
+      </div>
+    </div>
+
+    <div class="step-block step-2">
+      <div class="step-header">
+        <span class="step-badge">步骤 2</span>
+        <span class="step-name">Kontext Q4 换脸</span>
+        <span class="step-toggle">▸</span>
+      </div>
+      <!-- 收起：不显示 step-body -->
+    </div>
+  </div>
+
+  <!-- ===== 10. 批量 + 复合 ===== -->
+  <h2>10. 批量 + 复合工作流</h2>
+  <div class="dialog-frame">
+    <div class="dialog-header">批量 放大 + 换脸</div>
+    <div class="dialog-body">
+      <div class="dialog-section">
+        <div class="batch-summary">
+          <span class="batch-count">15</span><span>张图片将被处理</span>
+          <span style="font-size:12px;color:var(--muted-foreground);margin-left:auto;">跳过 2 张 AI 图</span>
+        </div>
+      </div>
+      <div class="form-field">
+        <label class="form-label">工作流</label>
+        <select class="dialog-select"><option>放大 + 换脸 (复合)</option></select>
+      </div>
+
+      <div class="step-block step-1">
+        <div class="step-header">
+          <span class="step-badge">步骤 1</span>
+          <span class="step-name">4x-Ultrasharp</span>
+          <span class="step-toggle open">▸</span>
+        </div>
+        <div class="step-body">
+          <div class="form-field">
+            <label class="form-sublabel">原图</label>
+            <div class="param-batch-fill">
+              <span class="param-batch-fill-icon">📋</span>
+              <span class="param-batch-fill-text">逐张自动填入（共 15 张）</span>
+              <span class="param-batch-fill-badge">批量</span>
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-sublabel">放大倍数</label>
+            <input class="dialog-input" type="number" value="2">
+          </div>
+        </div>
+      </div>
+
+      <div class="step-block step-2">
+        <div class="step-header">
+          <span class="step-badge">步骤 2</span>
+          <span class="step-name">Kontext Q4 换脸</span>
+          <span class="step-toggle">▸</span>
+        </div>
+        <!-- 默认收起，点击展开可配置人脸参考等参数 -->
+      </div>
+
+      <hr class="separator">
+
+      <div class="rd-dialog">
+        <div class="rd-section-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          结果保存到
+        </div>
+        <div class="rd-row">
+          <button class="rd-location-trigger">
+            <span class="loc-album" style="color:var(--muted-foreground);">跟随原图</span>
+            <span class="loc-arrow">▾</span>
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--muted-foreground);margin-top:4px;padding-left:2px;">每张结果保存到源图所在位置</div>
+        <div class="rd-chain-row">
+          <input type="checkbox" class="rd-checkbox" id="c6" checked>
+          <label class="rd-chain-label" for="c6">关联原图（生成链）</label>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button class="btn-outline">加入队列</button>
+      <button class="btn-primary">立即执行</button>
+    </div>
+  </div>
+  <div class="note">
+    <strong>批量 + 复合：</strong>步骤 1 的源图用橙色批量标示，步骤 2 默认收起（展开后可见锁定输入 + 可编辑参数）。三种模式（普通/批量/复合）的参数表单结构完全一致。
+  </div>
+
+  <!-- ===== 11. 默认值一览 ===== -->
+  <h2>11. 默认值一览</h2>
+  <div class="note" style="margin-top:0;">
+    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.3);">
+          <th style="text-align:left;padding:5px 6px;color:var(--foreground);">场景</th>
+          <th style="text-align:left;padding:5px 6px;color:var(--foreground);">保存位置</th>
+          <th style="text-align:center;padding:5px 6px;color:var(--foreground);">生成链</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.15);">
+          <td style="padding:4px 6px;">裁剪 crop</td><td style="padding:4px 6px;">源图位置</td><td style="padding:4px 6px;text-align:center;">☐ 关闭</td>
+        </tr>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.15);">
+          <td style="padding:4px 6px;">视频剪辑 trim</td><td style="padding:4px 6px;">源图位置</td><td style="padding:4px 6px;text-align:center;">☐ 关闭</td>
+        </tr>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.15);">
+          <td style="padding:4px 6px;">高清放大</td><td style="padding:4px 6px;">源图位置</td><td style="padding:4px 6px;text-align:center;">☑ 开启</td>
+        </tr>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.15);">
+          <td style="padding:4px 6px;">换脸</td><td style="padding:4px 6px;">人脸参考位置</td><td style="padding:4px 6px;text-align:center;">人脸参考 ▾</td>
+        </tr>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.15);">
+          <td style="padding:4px 6px;">局部修复</td><td style="padding:4px 6px;">源图位置</td><td style="padding:4px 6px;text-align:center;">☑ 开启</td>
+        </tr>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.15);">
+          <td style="padding:4px 6px;">其他 custom</td><td style="padding:4px 6px;">源图位置</td><td style="padding:4px 6px;text-align:center;">☑ 开启</td>
+        </tr>
+        <tr style="border-bottom:1px solid hsla(24,30%,30%,0.15);">
+          <td style="padding:4px 6px;">批量</td><td style="padding:4px 6px;">跟随原图</td><td style="padding:4px 6px;text-align:center;">☑ 开启</td>
+        </tr>
+        <tr>
+          <td style="padding:4px 6px;">复合</td><td style="padding:4px 6px;">按最终步骤</td><td style="padding:4px 6px;text-align:center;">☑ 开启</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+</body>
+</html>

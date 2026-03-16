@@ -3,6 +3,7 @@ import { Upload, X, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/hooks/use-toast'
+import { confirm } from '@/components/ConfirmDialog'
 import { useWorkflowStore } from '@/stores/workflow'
 import { workflowsApi, ParseResult, WorkflowManifest } from '@/api/workflows'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -13,38 +14,52 @@ interface Props {
   onClose: () => void
   onDone: () => void
   initialCategory?: string
+  /** When provided, opens in edit mode — skips upload, pre-fills from existing workflow */
+  editWorkflow?: { id: string; name: string; category: string; description: string | null; is_default: boolean; workflow_json: Record<string, any>; manifest: WorkflowManifest }
 }
 
 type Step = 'upload' | 'configure'
 
-export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props) {
+export function WorkflowImportDialog({ onClose, onDone, initialCategory, editWorkflow }: Props) {
   const { categories, fetchCategories, parseWorkflow, parseResult, parsing } = useWorkflowStore()
-  const [step, setStep] = useState<Step>('upload')
-  const [workflowJson, setWorkflowJson] = useState<Record<string, any> | null>(null)
+  const isEditMode = !!editWorkflow
+  const [step, setStep] = useState<Step>(isEditMode ? 'configure' : 'upload')
+  const [workflowJson, setWorkflowJson] = useState<Record<string, any> | null>(editWorkflow?.workflow_json || null)
   const [fileName, setFileName] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Config form state
-  const [name, setName] = useState('')
-  const [category, setCategory] = useState(initialCategory || '')
-  const [description, setDescription] = useState('')
-  const [isDefault, setIsDefault] = useState(false)
+  const [name, setName] = useState(editWorkflow?.name || '')
+  const [category, setCategory] = useState(editWorkflow?.category || initialCategory || '')
+  const [description, setDescription] = useState(editWorkflow?.description || '')
+  const [isDefault, setIsDefault] = useState(editWorkflow?.is_default || false)
   const [mappings, setMappings] = useState<Record<string, { node_id: string; key: string; type: string; source?: string }>>({})
   const [nodeAssignments, setNodeAssignments] = useState<{
     node_id: string; name: string; class_type: string
     role: 'none' | 'input' | 'output' | 'both'
-    scalars: { key: string; type: string; label: string; enabled: boolean }[]
+    scalars: { key: string; type: string; label: string; enabled: boolean; choices?: string[] }[]
     outputKey: string
     outputType: 'text' | 'image'
+    isImageInput?: boolean
+    imageSource?: 'media_id' | 'file_path'
+    imageLabel?: string
   }[]>([])
   const [showRef, setShowRef] = useState(false)
   const [showParseSummary, setShowParseSummary] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const editInitialized = useRef(false)
 
   useEffect(() => {
     fetchCategories()
   }, [fetchCategories])
+
+  // Edit mode: parse the existing workflow JSON to get parseResult
+  useEffect(() => {
+    if (!isEditMode || editInitialized.current || !editWorkflow.workflow_json) return
+    editInitialized.current = true
+    parseWorkflow(editWorkflow.workflow_json).catch(() => {})
+  }, [isEditMode, editWorkflow, parseWorkflow])
 
   // Auto-map when category or parseResult changes
   useEffect(() => {
@@ -79,6 +94,13 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
       }
     }
 
+    // In edit mode, restore saved mappings over auto-mapped ones
+    if (isEditMode && editWorkflow?.manifest?.mappings) {
+      for (const [paramName, saved] of Object.entries(editWorkflow.manifest.mappings)) {
+        newMappings[paramName] = { ...saved }
+      }
+    }
+
     setMappings(newMappings)
 
     // Build unified node assignments for all unmapped @-tagged nodes
@@ -90,7 +112,7 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
       // Gather scalar params for this node that aren't already category-mapped
       const nodeScalars = parseResult.scalar_params
         .filter(sp => sp.node_id === to.node_id && !mappedNodeKeys.has(`${sp.node_id}:${sp.node_key}`))
-        .map(sp => ({ key: sp.node_key, type: sp.type, label: sp.node_key, enabled: true }))
+        .map(sp => ({ key: sp.node_key, type: sp.type, label: sp.node_key, enabled: true, ...(sp.choices ? { choices: sp.choices } : {}) }))
 
       // Auto-set role: category-defined outputs default to 'output', others to 'none'
       const isCatOutput = catOutputs.some(
@@ -108,8 +130,88 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
         outputType: IMAGE_OUTPUT_CLASSES.has(to.class_type) ? 'image' as const : 'text' as const,
       }
     })
+
+    // Add unmapped LoadImage nodes so they appear in custom parameter assignment
+    const unmappedImages = parseResult.image_inputs.filter(
+      inp => !mappedNodeKeys.has(`${inp.node_id}:${inp.node_key}`)
+    )
+    for (const inp of unmappedImages) {
+      assignments.push({
+        node_id: inp.node_id,
+        name: inp.suggested_name,
+        class_type: 'LoadImage',
+        role: 'none',
+        scalars: [],
+        outputKey: '',
+        outputType: 'image',
+        isImageInput: true,
+        imageSource: 'media_id',
+        imageLabel: inp.suggested_name,
+      })
+    }
+
+    // In edit mode, restore saved node assignment roles from manifest
+    if (isEditMode && editWorkflow?.manifest) {
+      const savedExtra = editWorkflow.manifest.extra_params || []
+      const savedOutputs = editWorkflow.manifest.output_mappings || {}
+
+      // Build lookup sets for fast matching
+      const extraByNodeId = new Map<string, typeof savedExtra>()
+      for (const ep of savedExtra) {
+        const list = extraByNodeId.get(ep.node_id) || []
+        list.push(ep)
+        extraByNodeId.set(ep.node_id, list)
+      }
+      const outputByNodeId = new Map<string, { name: string; key: string; type?: string }>()
+      for (const [oName, oMapping] of Object.entries(savedOutputs)) {
+        outputByNodeId.set(oMapping.node_id, { name: oName, key: oMapping.key, type: oMapping.type })
+      }
+
+      for (const na of assignments) {
+        const hasExtra = extraByNodeId.has(na.node_id)
+        const hasOutput = outputByNodeId.has(na.node_id)
+
+        if (hasExtra && hasOutput) na.role = 'both'
+        else if (hasExtra) na.role = 'input'
+        else if (hasOutput) na.role = 'output'
+
+        // Restore scalar labels/enabled from saved extra_params
+        if (hasExtra) {
+          const eps = extraByNodeId.get(na.node_id)!
+          if (na.isImageInput) {
+            const imgEp = eps[0]
+            if (imgEp) {
+              na.imageLabel = imgEp.label || na.imageLabel
+              na.imageSource = (imgEp as any).source === 'file_path' ? 'file_path' : 'media_id'
+            }
+          } else {
+            for (const s of na.scalars) {
+              const match = eps.find(ep => ep.key === s.key)
+              if (match) {
+                s.label = match.label || s.label
+                s.enabled = true
+                // Restore choices from saved manifest if not already set from object_info
+                if (!s.choices && match.choices) {
+                  s.choices = match.choices
+                }
+              } else {
+                s.enabled = false
+              }
+            }
+          }
+        }
+
+        // Restore output key/type
+        if (hasOutput) {
+          const o = outputByNodeId.get(na.node_id)!
+          na.outputKey = o.name
+          na.outputType = o.type === 'image' ? 'image' : 'text'
+        }
+      }
+    }
+
     setNodeAssignments(assignments)
-  }, [parseResult, category, categories])
+  }, [parseResult, category, categories, isEditMode, editWorkflow])
 
   const handleFile = useCallback(async (file: File) => {
     try {
@@ -166,15 +268,33 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
     if (!workflowJson || !category || !name.trim()) return
 
     // Derive extra_params and output_mappings from nodeAssignments
-    const extraParams = nodeAssignments
-      .filter(na => na.role === 'input' || na.role === 'both')
-      .flatMap(na => na.scalars.filter(s => s.enabled).map(s => ({
-        name: `${na.name}.${s.key}`,
-        label: s.label,
-        type: s.type,
-        node_id: na.node_id,
-        key: s.key,
-      })))
+    const extraParams: { name: string; label: string; type: string; node_id: string; key: string; choices?: string[] }[] = []
+    for (const na of nodeAssignments) {
+      if (na.role !== 'input' && na.role !== 'both') continue
+      if (na.isImageInput) {
+        // LoadImage node → image-type extra param
+        extraParams.push({
+          name: na.name,
+          label: na.imageLabel || na.name,
+          type: 'image',
+          node_id: na.node_id,
+          key: 'image',
+          ...(na.imageSource === 'file_path' ? { source: 'file_path' } : {}),
+        })
+      } else {
+        for (const s of na.scalars) {
+          if (!s.enabled) continue
+          extraParams.push({
+            name: `${na.name}.${s.key}`,
+            label: s.label,
+            type: s.type,
+            node_id: na.node_id,
+            key: s.key,
+            ...(s.choices ? { choices: s.choices } : {}),
+          })
+        }
+      }
+    }
     const outputMappings: Record<string, { node_id: string; key: string; type?: string }> = {}
     for (const na of nodeAssignments) {
       if (na.role === 'output' || na.role === 'both') {
@@ -194,23 +314,33 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
 
     setSubmitting(true)
     try {
-      await workflowsApi.create({
-        name: name.trim(),
-        category,
-        description: description.trim() || undefined,
-        is_default: isDefault,
-        workflow_json: workflowJson,
-        manifest,
-      })
-      toast({ title: '工作流已注册' })
-      onDone()
+      if (isEditMode && editWorkflow) {
+        // Update existing workflow
+        await workflowsApi.update(editWorkflow.id, {
+          name: name.trim(),
+          description: description.trim() || undefined,
+          workflow_json: workflowJson,
+          manifest,
+        })
+        toast({ title: '工作流已更新' })
+        onDone()
+      } else {
+        // Create new workflow
+        await workflowsApi.create({
+          name: name.trim(),
+          category,
+          description: description.trim() || undefined,
+          is_default: isDefault,
+          workflow_json: workflowJson,
+          manifest,
+        })
+        toast({ title: '工作流已注册' })
+        onDone()
+      }
     } catch (e: any) {
-      if (e.message?.includes('already exists')) {
-        // 409 conflict — ask to overwrite
-        // Extract conflict ID from response headers if available
-        if (confirm(`工作流「${name}」已存在，是否覆盖？`)) {
+      if (!isEditMode && e.message?.includes('already exists')) {
+        if (await confirm({ title: `工作流「${name}」已存在，是否覆盖？`, variant: 'default' })) {
           try {
-            // Re-fetch to get the conflict ID
             const existing = await workflowsApi.list()
             const conflicting = existing.find(w => w.name === name.trim())
             if (conflicting) {
@@ -232,12 +362,12 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
           }
         }
       } else {
-        toast({ title: '注册失败', description: e.message, variant: 'destructive' })
+        toast({ title: isEditMode ? '更新失败' : '注册失败', description: e.message, variant: 'destructive' })
       }
     } finally {
       setSubmitting(false)
     }
-  }, [workflowJson, category, name, description, isDefault, mappings, nodeAssignments, onDone])
+  }, [workflowJson, category, name, description, isDefault, mappings, nodeAssignments, onDone, isEditMode, editWorkflow])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
@@ -247,7 +377,7 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h2 className="text-base font-semibold">导入工作流</h2>
+          <h2 className="text-base font-semibold">{isEditMode ? '编辑工作流' : '导入工作流'}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X className="w-4 h-4" />
           </button>
@@ -344,7 +474,7 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1 block">类别</label>
-                  <Select value={category} onValueChange={setCategory}>
+                  <Select value={category} onValueChange={setCategory} disabled={isEditMode}>
                     <SelectTrigger>
                       <SelectValue placeholder="选择类别..." />
                     </SelectTrigger>
@@ -439,7 +569,10 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
                         </div>
                         {/* Role selector */}
                         <div className="flex gap-1 flex-wrap">
-                          {(['none', 'input', 'output', 'both'] as const).map(role => (
+                          {(na.isImageInput
+                            ? ['none', 'input'] as const
+                            : ['none', 'input', 'output', 'both'] as const
+                          ).map(role => (
                             <button
                               key={role}
                               className={`px-2 py-0.5 text-xs rounded-full border transition-colors ${
@@ -475,7 +608,7 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
                                   className="rounded border-input shrink-0"
                                 />
                                 <span className="text-xs font-mono text-muted-foreground shrink-0">{s.key}</span>
-                                <span className="text-xs text-muted-foreground/50 shrink-0">{s.type}</span>
+                                <span className="text-xs text-muted-foreground/50 shrink-0">{s.type}{s.choices ? ' ▾' : ''}</span>
                                 {s.enabled && (
                                   <Input
                                     className="w-24 h-6 text-xs ml-auto"
@@ -494,7 +627,46 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
                             ))}
                           </div>
                         )}
-                        {(na.role === 'input' || na.role === 'both') && na.scalars.length === 0 && (
+                        {(na.role === 'input' || na.role === 'both') && na.isImageInput && (
+                          <div className="pl-2 space-y-2 border-l-2 border-primary/20 ml-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground shrink-0">类型:</span>
+                              <div className="flex gap-1">
+                                {([['media_id', '图片'], ['file_path', '遮罩']] as const).map(([src, label]) => (
+                                  <button
+                                    key={src}
+                                    className={`px-2 py-0.5 text-xs rounded-full border transition-colors ${
+                                      na.imageSource === src
+                                        ? 'border-primary bg-primary/10 text-primary'
+                                        : 'border-border text-muted-foreground hover:text-foreground'
+                                    }`}
+                                    onClick={() => {
+                                      const next = [...nodeAssignments]
+                                      next[ni] = { ...na, imageSource: src }
+                                      setNodeAssignments(next)
+                                    }}
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground shrink-0">标签:</span>
+                              <Input
+                                className="w-32 h-6 text-xs"
+                                value={na.imageLabel || ''}
+                                onChange={e => {
+                                  const next = [...nodeAssignments]
+                                  next[ni] = { ...na, imageLabel: e.target.value }
+                                  setNodeAssignments(next)
+                                }}
+                                placeholder="显示名称"
+                              />
+                            </div>
+                          </div>
+                        )}
+                        {(na.role === 'input' || na.role === 'both') && !na.isImageInput && na.scalars.length === 0 && (
                           <p className="text-xs text-muted-foreground/60 pl-3">该节点无可用标量输入</p>
                         )}
                         {/* Output config — show when role is output or both */}
@@ -622,15 +794,20 @@ export function WorkflowImportDialog({ onClose, onDone, initialCategory }: Props
         {/* Footer */}
         {step === 'configure' && (
           <div className="px-5 py-3 border-t border-border flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { setStep('upload'); setWorkflowJson(null) }}>
-              重新选择
+            {!isEditMode && (
+              <Button variant="outline" onClick={() => { setStep('upload'); setWorkflowJson(null) }}>
+                重新选择
+              </Button>
+            )}
+            <Button variant="outline" onClick={onClose}>
+              取消
             </Button>
             <Button
               onClick={handleSubmit}
               disabled={submitting || !name.trim() || !category || requiredMissing}
             >
               {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : null}
-              注册工作流
+              {isEditMode ? '保存' : '注册工作流'}
             </Button>
           </div>
         )}

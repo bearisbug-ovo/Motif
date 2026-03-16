@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react'
-import { RotateCcw, Trash2, Trash } from 'lucide-react'
-import { recycleBinApi, RecycleBinResponse } from '@/api/recycleBin'
+import { RotateCcw, Trash2, Trash, ChevronLeft, ChevronRight } from 'lucide-react'
+import { recycleBinApi, RecycleBinItem } from '@/api/recycleBin'
 import { mediaApi } from '@/api/media'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
+import { confirm } from '@/components/ConfirmDialog'
+import { useGridZoom } from '@/hooks/useGridZoom'
+import { EmptyState } from '@/components/Skeleton'
 
-export function RecycleBin() {
-  const [data, setData] = useState<RecycleBinResponse | null>(null)
+interface RecycleBinData {
+  total: number
+  page: number
+  page_size: number
+  items: RecycleBinItem[]
+}
+
+export function RecycleBinContent() {
+  const [data, setData] = useState<RecycleBinData | null>(null)
   const [loading, setLoading] = useState(false)
   const [page, setPage] = useState(1)
+  const { containerRef, gridStyle } = useGridZoom({ pageKey: 'recycle-bin' })
 
   const fetchData = async (p = page) => {
     setLoading(true)
@@ -35,7 +46,7 @@ export function RecycleBin() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('永久删除此文件？此操作不可撤销。')) return
+    if (!await confirm({ title: '永久删除此文件？', description: '此操作不可撤销。' })) return
     try {
       await recycleBinApi.permanentDelete(id)
       toast({ title: '已永久删除' })
@@ -46,7 +57,7 @@ export function RecycleBin() {
   }
 
   const handleEmpty = async () => {
-    if (!confirm(`确定清空回收站（共 ${data?.total} 项）？此操作不可撤销。`)) return
+    if (!await confirm({ title: `确定清空回收站（共 ${data?.total} 项）？`, description: '此操作不可撤销。' })) return
     try {
       await recycleBinApi.empty()
       toast({ title: '回收站已清空' })
@@ -56,31 +67,28 @@ export function RecycleBin() {
     }
   }
 
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 h-14 border-b border-border shrink-0">
-        <h1 className="text-lg font-semibold">回收站</h1>
-        <div className="flex items-center gap-2">
-          {data && data.total > 0 && (
-            <Button variant="destructive" size="sm" onClick={handleEmpty}>
-              <Trash className="w-4 h-4 mr-1.5" />
-              清空回收站 ({data.total})
-            </Button>
-          )}
-        </div>
-      </div>
+  const totalPages = data ? Math.ceil(data.total / data.page_size) : 0
 
-      <div className="flex-1 overflow-auto px-6 py-4">
-        {loading ? (
-          <div className="flex items-center justify-center h-64 text-muted-foreground">加载中...</div>
-        ) : !data || data.items.length === 0 ? (
-          <div className="flex items-center justify-center h-64 text-muted-foreground">
-            回收站为空
-          </div>
+  return (
+    <div data-testid="recycle-bin-page" className="flex flex-col h-full">
+      {/* Toolbar */}
+      {data && data.total > 0 && (
+        <div className="flex items-center justify-between px-1 sm:px-6 py-2 shrink-0">
+          <span className="text-sm text-muted-foreground">共 {data.total} 项</span>
+          <Button variant="destructive" size="sm" onClick={handleEmpty}>
+            <Trash className="w-4 h-4 mr-1.5" />
+            清空回收站
+          </Button>
+        </div>
+      )}
+
+      <div ref={containerRef} className="flex-1 overflow-auto px-1 sm:px-6 py-2 sm:py-4 pb-28 md:pb-4">
+        {!data || data.items.length === 0 ? (
+          <EmptyState icon={Trash} title="回收站为空" description="删除的图片会出现在这里" />
         ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
+          <div style={gridStyle}>
             {data.items.map((item) => (
-              <div key={item.id} className="group relative rounded-md overflow-hidden bg-card border border-border">
+              <div key={item.id} data-testid="recycle-item" className="group relative rounded-none sm:rounded-md overflow-hidden bg-card border border-border">
                 <div className="aspect-square overflow-hidden">
                   <img
                     src={mediaApi.thumbUrl(item.file_path, 200)}
@@ -106,19 +114,48 @@ export function RecycleBin() {
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="p-1.5">
+                <div className="p-1.5 space-y-0.5">
                   <p className="text-xs text-muted-foreground truncate">{item.file_path.split(/[\\/]/).pop()}</p>
-                  {item.deleted_at && (
-                    <p className="text-xs text-muted-foreground/60">
-                      {new Date(item.deleted_at).toLocaleDateString()}
+                  {(item.person_name || item.album_name) && (
+                    <p className="text-xs text-muted-foreground/80 truncate">
+                      {[item.person_name, item.album_name].filter(Boolean).join(' / ')}
                     </p>
                   )}
+                  <div className="flex items-center justify-between">
+                    {item.deleted_at && (
+                      <span className="text-xs text-muted-foreground/60">
+                        {new Date(item.deleted_at).toLocaleDateString()}
+                      </span>
+                    )}
+                    {item.days_until_auto_delete != null && (
+                      <span className={`text-xs ${item.days_until_auto_delete <= 3 ? 'text-red-400' : 'text-muted-foreground/60'}`}>
+                        {item.days_until_auto_delete}天后删除
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 px-6 py-3 border-t border-border shrink-0">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+            <ChevronLeft className="w-4 h-4" />
+            上一页
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            {page} / {totalPages}
+          </span>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+            下一页
+            <ChevronRight className="w-4 h-4" />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

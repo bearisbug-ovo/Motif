@@ -34,3 +34,15 @@ desktop.ini
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Windows reserved names
+nul
+frontend/nul
+
+# App data & logs
+backend/appdata/
+.logs/
+
+# Temp files
+testformask_*.png
+11.json

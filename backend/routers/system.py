@@ -27,6 +27,7 @@ class ConfigUpdate(BaseModel):
     appdata_dir: str | None = None
     task_timeout_minutes: int | None = None
     fastapi_port: int | None = None
+    platform_cookies: dict | None = None
 
 
 @router.get("/status")

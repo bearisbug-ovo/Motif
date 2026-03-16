@@ -1,5 +1,17 @@
 import http from './http'
 
+export interface PersonAccount {
+  id: string
+  platform: string
+  username: string
+  display_name?: string | null
+}
+
+export interface PersonTag {
+  id: string
+  name: string
+}
+
 export interface Person {
   id: string
   name: string
@@ -9,6 +21,8 @@ export interface Person {
   rated_count: number
   media_count: number
   album_count: number
+  accounts?: PersonAccount[]
+  tags?: PersonTag[]
   created_at: string
   updated_at: string
 }
@@ -20,14 +34,15 @@ export interface PersonCreate {
 export interface PersonUpdate {
   name?: string
   cover_media_id?: string
+  tag_ids?: string[]
 }
 
 export type PersonSortField = 'created_at' | 'avg_rating' | 'name'
 export type RatingFilter = string // e.g. "gte:4"
 
 export const personsApi = {
-  list: (sort?: PersonSortField, filterRating?: RatingFilter) =>
-    http.get<Person[]>('/persons', { params: { sort, filter_rating: filterRating } }).then(r => r.data),
+  list: (sort?: PersonSortField, filterRating?: RatingFilter, sortDir?: string, tagIds?: string) =>
+    http.get<Person[]>('/persons', { params: { sort, sort_dir: sortDir, filter_rating: filterRating, tag_ids: tagIds } }).then(r => r.data),
 
   get: (id: string) =>
     http.get<Person>(`/persons/${id}`).then(r => r.data),

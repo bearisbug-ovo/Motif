@@ -13,6 +13,12 @@ export interface TaskItem {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  resolved?: Record<string, string>
+  batch_id?: string | null
+  chain_id?: string | null
+  chain_order?: number
+  chain_source_param?: string | null
+  chain_tasks?: { id: string; workflow_type: string; status: string; chain_order: number; label?: string }[]
 }
 
 export interface TaskProgress {
@@ -43,17 +49,42 @@ export interface TaskCreateBody {
   execution_mode?: 'immediate' | 'queued'
 }
 
-export interface BatchFaceSwapBody {
-  album_id: string
-  face_ref_media_id: string
+export interface ChainStepCreate {
+  workflow_type: string
+  params: Record<string, any>
+  chain_source_param: string
+}
+
+export interface ChainTaskCreateBody {
+  first: TaskCreateBody
+  then: ChainStepCreate[]
+  execution_mode?: 'immediate' | 'queued'
+}
+
+export interface BatchAiBody {
+  workflow_type: string
+  media_ids?: string[]
+  album_id?: string
+  source_param_name: string
+  shared_params: Record<string, any>
   target_person_id?: string
-  count?: number
-  result_album_name?: string
+  result_album_id?: string
+  chain_step?: ChainStepCreate
+}
+
+export interface BatchAiResult {
+  tasks_created: number
+  batch_id: string
+  chains_created?: number
+  skipped_generated?: number
 }
 
 export const tasksApi = {
   create: (body: TaskCreateBody) =>
     http.post<TaskItem>('/tasks', body).then(r => r.data),
+
+  createChain: (body: ChainTaskCreateBody) =>
+    http.post<TaskItem[]>('/tasks/chain', body).then(r => r.data),
 
   list: (status?: string) =>
     http.get<TaskItem[]>('/tasks', { params: status ? { status } : {} }).then(r => r.data),
@@ -79,11 +110,14 @@ export const tasksApi = {
   delete: (id: string) =>
     http.delete(`/tasks/${id}`),
 
+  bulkDelete: (statuses: string[]) =>
+    http.post<{ deleted: number }>('/tasks/bulk-delete', { statuses }).then(r => r.data),
+
   reorder: (taskIds: string[]) =>
     http.patch<{ ok: boolean }>('/tasks/reorder', { task_ids: taskIds }).then(r => r.data),
 
-  batchFaceSwap: (body: BatchFaceSwapBody) =>
-    http.post<{ result_album_id: string; tasks_created: number }>('/tasks/batch-faceswap', body).then(r => r.data),
+  batchAi: (body: BatchAiBody) =>
+    http.post<BatchAiResult>('/tasks/batch', body).then(r => r.data),
 
   // Queue control
   startQueue: () =>

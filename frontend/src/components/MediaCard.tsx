@@ -1,13 +1,17 @@
 import { useState, useCallback } from 'react'
-import { Trash2, ImageIcon, Star, AlertTriangle, Info } from 'lucide-react'
+import { Trash2, ImageIcon, Star, AlertTriangle, Info, CheckSquare, FileSearch, Crop, Scissors } from 'lucide-react'
 import { MediaItem, mediaApi } from '@/api/media'
 import { StarRating } from './StarRating'
+import { confirmAndDelete } from '@/lib/deleteMedia'
+import { systemApi } from '@/api/system'
 import { ContextMenuPortal, MenuItem, MenuSeparator } from './ContextMenuPortal'
 import { useMediaStore } from '@/stores/media'
 import { useAlbumStore } from '@/stores/album'
 import { usePersonStore } from '@/stores/person'
 import { toast } from '@/hooks/use-toast'
 import { MediaDetailDialog } from './MediaDetailDialog'
+import { CropEditor } from './CropEditor'
+import { VideoTrimEditor } from './VideoTrimEditor'
 import { cn } from '@/lib/utils'
 
 const BADGE_COLORS: Record<number, string> = {
@@ -50,6 +54,8 @@ export function MediaCard({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [imgError, setImgError] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [cropOpen, setCropOpen] = useState(false)
+  const [trimOpen, setTrimOpen] = useState(false)
   const { updateMedia, softDelete } = useMediaStore()
   const { updateAlbum } = useAlbumStore()
   const { updatePerson } = usePersonStore()
@@ -63,9 +69,7 @@ export function MediaCard({
 
   const handleDelete = useCallback(async () => {
     setContextMenu(null)
-    if (confirm('确定要删除这张图片吗？')) {
-      await softDelete(item.id)
-    }
+    await confirmAndDelete(item.id, softDelete)
   }, [item.id, softDelete])
 
   const handleSetAlbumCover = useCallback(async () => {
@@ -96,6 +100,53 @@ export function MediaCard({
     setContextMenu(null)
     await updateMedia(item.id, { rating })
   }, [item.id, updateMedia])
+
+  const handleRelocate = useCallback(async () => {
+    setContextMenu(null)
+    try {
+      const { paths } = await systemApi.pickFiles()
+      if (paths.length === 0) return
+      const updated = await mediaApi.relocate(item.id, paths[0])
+      useMediaStore.getState().replaceItem(updated)
+      toast({ title: '文件已重新定位' })
+    } catch (err: any) {
+      toast({ title: '重新定位失败', description: err.message, variant: 'destructive' })
+    }
+  }, [item.id])
+
+  const handleCropComplete = useCallback(async (blob: Blob, options: import('./CropEditor').CropSaveOptions) => {
+    setCropOpen(false)
+    try {
+      const result = await mediaApi.cropMedia(item.id, blob, {
+        overwrite: options.overwrite,
+        personId: options.personId,
+        albumId: options.albumId,
+        linkParent: options.linkParent,
+      })
+      if (options.overwrite) {
+        useMediaStore.getState().replaceItem(result)
+      }
+      toast({ title: options.overwrite ? '裁剪已保存（覆盖原图）' : '裁剪已保存为新图片' })
+    } catch (err: any) {
+      toast({ title: '裁剪失败', description: err.message, variant: 'destructive' })
+    }
+  }, [item.id])
+
+  const handleTrimComplete = useCallback(async (start: number, end: number, options: import('./VideoTrimEditor').TrimSaveOptions) => {
+    setTrimOpen(false)
+    try {
+      toast({ title: '正在裁剪视频...' })
+      await mediaApi.trimVideo(item.id, start, end, {
+        precise: options.precise,
+        personId: options.personId,
+        albumId: options.albumId,
+        linkParent: options.linkParent,
+      })
+      toast({ title: '视频裁剪完成' })
+    } catch (err: any) {
+      toast({ title: '视频裁剪失败', description: err.message, variant: 'destructive' })
+    }
+  }, [item.id])
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -225,6 +276,13 @@ export function MediaCard({
 
           {extraMenuItems}
 
+          {item.media_type === 'image' && (
+            <MenuItem icon={<Crop className="w-3.5 h-3.5" />} label="裁剪" onClick={() => { setContextMenu(null); setCropOpen(true) }} />
+          )}
+          {item.media_type === 'video' && (
+            <MenuItem icon={<Scissors className="w-3.5 h-3.5" />} label="裁剪视频" onClick={() => { setContextMenu(null); setTrimOpen(true) }} />
+          )}
+
           {/* Quick rating */}
           <div className="px-3 py-1.5 flex items-center gap-1">
             <Star className="w-3.5 h-3.5 text-muted-foreground" />
@@ -243,6 +301,19 @@ export function MediaCard({
             ))}
           </div>
 
+          {!selectable && (
+            <MenuItem icon={<CheckSquare className="w-3.5 h-3.5" />} label="开启多选" onClick={() => {
+              setContextMenu(null)
+              const store = useMediaStore.getState()
+              store.setMultiSelectMode(true)
+              store.toggleSelection(item.id)
+            }} />
+          )}
+
+          {missingFile && (
+            <MenuItem icon={<FileSearch className="w-3.5 h-3.5" />} label="重新定位文件" onClick={handleRelocate} />
+          )}
+
           <MenuSeparator />
 
           <MenuItem icon={<Info className="w-3.5 h-3.5" />} label="查看详情" onClick={() => { setContextMenu(null); setDetailOpen(true) }} />
@@ -250,7 +321,30 @@ export function MediaCard({
         </ContextMenuPortal>
       )}
 
-      <MediaDetailDialog open={detailOpen} onOpenChange={setDetailOpen} item={item} />
+      <MediaDetailDialog
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        item={item}
+        isMissing={missingFile}
+        onRelocated={(updated) => {
+          useMediaStore.getState().replaceItem(updated)
+        }}
+      />
+
+      <CropEditor
+        open={cropOpen}
+        onClose={() => setCropOpen(false)}
+        media={item}
+        mode="save"
+        onComplete={handleCropComplete}
+      />
+
+      <VideoTrimEditor
+        open={trimOpen}
+        onClose={() => setTrimOpen(false)}
+        media={item}
+        onComplete={handleTrimComplete}
+      />
     </>
   )
 }

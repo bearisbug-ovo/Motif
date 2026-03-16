@@ -126,8 +126,18 @@ async def _should_execute() -> bool:
                 _task_added_event.clear()
             except asyncio.TimeoutError:
                 return False
-            # Wait for the delay period after last task was added
-            await asyncio.sleep(delay_minutes * 60)
+            # Debounce: wait for delay period, but respond to manual start
+            # and reset timer when new tasks are added
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + delay_minutes * 60
+            while loop.time() < deadline:
+                if _manual_event.is_set():
+                    _manual_event.clear()
+                    return True
+                if _task_added_event.is_set():
+                    _task_added_event.clear()
+                    deadline = loop.time() + delay_minutes * 60  # reset debounce
+                await asyncio.sleep(1)
             return True
 
         elif mode == "cron":
@@ -207,6 +217,12 @@ async def _execute_next_task() -> bool:
                 t.result_outputs = json.dumps(result_outputs, ensure_ascii=False)
             t.finished_at = datetime.utcnow()
             db.commit()
+
+            # Chain handling: if this task is part of a chain, try to execute next step
+            if t.chain_id:
+                chain_continued = await _handle_chain_success(t, db)
+                if chain_continued:
+                    return True  # chain step was executed, skip normal badge notify
         finally:
             db.close()
 
@@ -230,6 +246,8 @@ async def _execute_next_task() -> bool:
             t.error_message = f"Task timed out after {settings.task_timeout_minutes} minutes"
             t.finished_at = datetime.utcnow()
             db.commit()
+            if t.chain_id:
+                _fail_chain_successors(t, db)
         finally:
             db.close()
         logger.error(f"Task {task_id} timed out")
@@ -244,10 +262,245 @@ async def _execute_next_task() -> bool:
             t.error_message = str(e)[:2000]
             t.finished_at = datetime.utcnow()
             db.commit()
+            if t.chain_id:
+                _fail_chain_successors(t, db)
         finally:
             db.close()
         logger.error(f"Task {task_id} failed: {e}", exc_info=True)
         return True
+
+
+# ── Chain helpers ──────────────────────────────────────────────────────────────
+
+async def _handle_chain_success(completed_task: Task, db) -> bool:
+    """After a chain task succeeds, forward output to next step and execute it.
+
+    Returns True if a chain step was executed (caller should skip normal flow).
+    """
+    from sqlalchemy import select
+
+    next_task = db.execute(
+        select(Task).where(
+            Task.chain_id == completed_task.chain_id,
+            Task.chain_order == completed_task.chain_order + 1,
+            Task.status == "pending",
+        )
+    ).scalar_one_or_none()
+
+    if not next_task:
+        # No more steps — finalize chain
+        _finalize_chain_success(completed_task.chain_id, db)
+        return False
+
+    # Forward: inject previous result into next task's params
+    result_ids = json.loads(completed_task.result_media_ids) if completed_task.result_media_ids else []
+    if not result_ids:
+        next_task.status = "failed"
+        next_task.error_message = "链式前置任务无输出"
+        next_task.finished_at = datetime.utcnow()
+        db.commit()
+        logger.warning(f"Chain {completed_task.chain_id}: no output from step {completed_task.chain_order}")
+        return True
+
+    # Replace __chain_input__ placeholder with actual media ID
+    next_params = json.loads(next_task.params) if next_task.params else {}
+    source_param = next_task.chain_source_param
+    if source_param and next_params.get(source_param) == "__chain_input__":
+        next_params[source_param] = result_ids[0]
+        next_task.params = json.dumps(next_params, ensure_ascii=False)
+        db.commit()
+
+    logger.info(f"Chain {completed_task.chain_id}: forwarding to step {next_task.chain_order} (task {next_task.id})")
+
+    # Close current DB session before executing next task
+    db.close()
+
+    # Execute the next task immediately (atomic chain execution)
+    executed = await _execute_chain_step(next_task.id)
+    return True
+
+
+async def _execute_chain_step(task_id: str) -> bool:
+    """Execute a single chain step task. Similar to _execute_next_task but for a specific task."""
+    global _current_progress
+    from sqlalchemy import select
+
+    db = SessionLocal()
+    try:
+        task = db.get(Task, task_id)
+        if not task or task.status != "pending":
+            return False
+
+        task.status = "running"
+        task.started_at = datetime.utcnow()
+        db.commit()
+        logger.info(f"Executing chain step task {task_id} ({task.workflow_type})")
+    finally:
+        db.close()
+
+    try:
+        settings = get_settings()
+        timeout_s = settings.task_timeout_minutes * 60
+        _check_disk_space(settings)
+        _current_progress = {"task_id": task_id, "value": 0, "max": 1}
+
+        result_media_ids, result_outputs, preview_paths = await asyncio.wait_for(
+            _run_task(task_id), timeout=timeout_s,
+        )
+        _current_progress = None
+
+        db = SessionLocal()
+        try:
+            t = db.get(Task, task_id)
+            if t.status == "cancelled":
+                return True
+            t.status = "completed"
+            t.result_media_ids = json.dumps(result_media_ids)
+            if result_outputs:
+                t.result_outputs = json.dumps(result_outputs, ensure_ascii=False)
+            t.finished_at = datetime.utcnow()
+            db.commit()
+
+            # Continue chain if there are more steps
+            if t.chain_id:
+                await _handle_chain_success(t, db)
+        finally:
+            db.close()
+
+        # Notify badge for the final chain result
+        try:
+            from routers.tasks import increment_completed_count
+            increment_completed_count()
+        except ImportError:
+            pass
+
+        return True
+
+    except (asyncio.TimeoutError, Exception) as e:
+        _current_progress = None
+        is_timeout = isinstance(e, asyncio.TimeoutError)
+        db = SessionLocal()
+        try:
+            t = db.get(Task, task_id)
+            t.status = "failed"
+            if is_timeout:
+                t.error_message = f"Task timed out after {get_settings().task_timeout_minutes} minutes"
+            else:
+                t.error_message = str(e)[:2000]
+            t.finished_at = datetime.utcnow()
+            db.commit()
+            # Cascade failure to subsequent chain steps
+            if t.chain_id:
+                _fail_chain_successors(t, db)
+            logger.error(f"Chain step {task_id} failed: {e}")
+        finally:
+            db.close()
+        return True
+
+
+def _fail_chain_successors(failed_task: Task, db):
+    """When a chain task fails, mark all later pending steps as failed."""
+    from sqlalchemy import select
+
+    if not failed_task.chain_id:
+        return
+
+    later = db.execute(
+        select(Task).where(
+            Task.chain_id == failed_task.chain_id,
+            Task.chain_order > failed_task.chain_order,
+            Task.status == "pending",
+        )
+    ).scalars().all()
+
+    for t in later:
+        t.status = "failed"
+        t.error_message = f"链式前置任务失败: {(failed_task.error_message or '未知错误')[:200]}"
+        t.finished_at = datetime.utcnow()
+
+    if later:
+        db.commit()
+        logger.info(f"Chain {failed_task.chain_id}: failed {len(later)} successor tasks")
+
+
+def _finalize_chain_success(chain_id: str, db):
+    """After all chain steps succeed, reparent final output and soft-delete intermediates."""
+    if not chain_id:
+        return
+
+    from sqlalchemy import select
+
+    chain_tasks = db.execute(
+        select(Task).where(Task.chain_id == chain_id).order_by(Task.chain_order.asc())
+    ).scalars().all()
+
+    if not chain_tasks or len(chain_tasks) < 2:
+        return
+
+    # Check all completed
+    if not all(t.status == "completed" for t in chain_tasks):
+        return
+
+    first_task = chain_tasks[0]
+    last_task = chain_tasks[-1]
+
+    # Determine original source media ID from first task
+    first_params = json.loads(first_task.params) if first_task.params else {}
+    original_source_id = first_params.get("source_media_id")
+
+    # If no explicit source_media_id, look through workflow manifest
+    if not original_source_id:
+        from models.workflow import Workflow
+        if first_task.workflow_type.startswith("custom:"):
+            wf_id = first_task.workflow_type[len("custom:"):]
+            wf = db.get(Workflow, wf_id)
+            if wf and wf.manifest:
+                manifest = json.loads(wf.manifest)
+                for pname, mapping in manifest.get("mappings", {}).items():
+                    if mapping.get("type") == "image" and mapping.get("source") != "file_path":
+                        val = first_params.get(pname)
+                        if val and val != "__chain_input__":
+                            original_source_id = val
+                            break
+
+    if not original_source_id:
+        logger.warning(f"Chain {chain_id}: could not determine original source, skipping reparent")
+        return
+
+    # Reparent final output to original source
+    last_result_ids = json.loads(last_task.result_media_ids) if last_task.result_media_ids else []
+    for mid in last_result_ids:
+        m = db.get(Media, mid)
+        if m:
+            m.parent_media_id = original_source_id
+            # Record chain history in generation_params (with category for display)
+            gen_params = json.loads(m.generation_params) if m.generation_params else {}
+            history = []
+            for t in chain_tasks:
+                entry = {"workflow_type": t.workflow_type, "chain_order": t.chain_order}
+                # Resolve category from custom workflow
+                if t.workflow_type.startswith("custom:"):
+                    from models.workflow import Workflow as WfModel
+                    wf_obj = db.get(WfModel, t.workflow_type[len("custom:"):])
+                    if wf_obj:
+                        entry["category"] = wf_obj.category
+                else:
+                    entry["category"] = t.workflow_type
+                history.append(entry)
+            gen_params["chain_history"] = history
+            m.generation_params = json.dumps(gen_params, ensure_ascii=False)
+
+    # Soft-delete intermediate results (from steps before the last)
+    for t in chain_tasks[:-1]:
+        intermediate_ids = json.loads(t.result_media_ids) if t.result_media_ids else []
+        for mid in intermediate_ids:
+            m = db.get(Media, mid)
+            if m and not m.is_deleted:
+                m.is_deleted = True
+                logger.info(f"Chain {chain_id}: soft-deleted intermediate media {mid}")
+
+    db.commit()
+    logger.info(f"Chain {chain_id}: finalized, reparented {len(last_result_ids)} results to {original_source_id}")
 
 
 def _check_disk_space(settings):
@@ -280,15 +533,25 @@ async def _run_task(task_id: str) -> tuple[list[str], dict | None, list[str]]:
 
     if workflow_type == "upscale":
         ids = await _run_upscale(params, on_progress)
-        return ids, None, []
+        result = ids, None, []
     elif workflow_type == "face_swap":
         ids = await _run_faceswap(params, on_progress)
-        return ids, None, []
+        result = ids, None, []
     elif workflow_type in ("inpaint_flux", "inpaint_sdxl", "inpaint_klein"):
         ids = await _run_inpaint(params, workflow_type, on_progress)
-        return ids, None, []
+        result = ids, None, []
     else:
-        return await _run_custom_workflow(params, workflow_type, on_progress)
+        result = await _run_custom_workflow(params, workflow_type, on_progress)
+
+    # Clean up temporary crop file if present
+    crop_path = params.get("crop_path")
+    if crop_path:
+        try:
+            os.remove(crop_path)
+        except OSError:
+            pass
+
+    return result
 
 
 # ── Upscale ───────────────────────────────────────────────────────────────────
@@ -316,8 +579,8 @@ async def _run_upscale(params: dict, on_progress=None) -> list[str]:
         if not source or source.is_deleted:
             raise RuntimeError(f"Source media {source_media_id} not found")
         source_path = source.file_path
-        source_person_id = source.person_id
-        source_album_id = source.album_id
+        source_person_id = params.get("target_person_id") or source.person_id
+        source_album_id = params.get("result_album_id") or source.album_id
     finally:
         db.close()
 
@@ -411,8 +674,17 @@ async def _run_faceswap(params: dict, on_progress=None) -> list[str]:
             raise RuntimeError(f"Face ref media {face_ref_media_id} not found")
         source_path = source.file_path
         face_ref_path = face_ref.file_path
-        person_id = target_person_id or source.person_id
-        album_id = result_album_id or source.album_id
+        # Default: result belongs to face_ref's person (the face in the result)
+        person_id = target_person_id or face_ref.person_id or source.person_id
+        # album_id must belong to the same person (constraint: Media.person_id == Album.person_id)
+        if result_album_id:
+            album_id = result_album_id
+        elif face_ref.album_id and face_ref.person_id == person_id:
+            album_id = face_ref.album_id
+        elif source.album_id and source.person_id == person_id:
+            album_id = source.album_id
+        else:
+            album_id = None  # loose item under person
     finally:
         db.close()
 
@@ -457,7 +729,7 @@ async def _run_faceswap(params: dict, on_progress=None) -> list[str]:
                 file_path=str(out_path),
                 media_type="image",
                 source_type="generated",
-                parent_media_id=face_ref_media_id,
+                parent_media_id=source_media_id,
                 workflow_type="face_swap",
                 generation_params=json.dumps({
                     "source_media_id": source_media_id,
@@ -505,8 +777,8 @@ async def _run_inpaint(params: dict, workflow_type: str, on_progress=None) -> li
         if not source or source.is_deleted:
             raise RuntimeError(f"Source media {source_media_id} not found")
         source_path = source.file_path
-        source_person_id = source.person_id
-        source_album_id = source.album_id
+        source_person_id = params.get("target_person_id") or source.person_id
+        source_album_id = params.get("result_album_id") or source.album_id
     finally:
         db.close()
 
@@ -585,6 +857,14 @@ async def _run_inpaint(params: dict, workflow_type: str, on_progress=None) -> li
         os.remove(mask_path)
     except OSError:
         pass
+
+    # Clean up crop file if present
+    crop_path = params.get("crop_path")
+    if crop_path:
+        try:
+            os.remove(crop_path)
+        except OSError:
+            pass
 
     return media_ids
 
@@ -723,7 +1003,23 @@ async def _run_custom_workflow(
     # Apply extra params
     for ep in manifest.get("extra_params", []):
         ep_value = params.get(ep["name"])
-        if ep_value is not None:
+        if ep_value is None:
+            continue
+        if ep.get("type") == "image":
+            # Image extra param: value is a media_id — upload to ComfyUI
+            if ep.get("source") == "file_path":
+                comfy_name = await client.upload_image(ep_value)
+            else:
+                db = SessionLocal()
+                try:
+                    media = db.get(Media, ep_value)
+                    if not media or media.is_deleted:
+                        raise RuntimeError(f"Media {ep_value} not found")
+                    comfy_name = await client.upload_image(media.file_path)
+                finally:
+                    db.close()
+            workflow_json[ep["node_id"]]["inputs"][ep["key"]] = comfy_name
+        else:
             workflow_json[ep["node_id"]]["inputs"][ep["key"]] = ep_value
 
     # Run workflow
@@ -738,8 +1034,27 @@ async def _run_custom_workflow(
 
     # Save result images
     media_ids: list[str] = []
-    if results:
-        source_media_id = params.get("source_media_id")
+
+    # Collect image data from SaveImage results + output_mappings images
+    image_items: list[tuple[str, bytes | None, str | None]] = []
+    # (filename, data, None) for SaveImage results — need to save data
+    # (filename, None, existing_path) for output_mapping images — already on disk
+    for filename, data in results:
+        image_items.append((filename, data, None))
+
+    # If no SaveImage results but output_mappings produced images, promote them
+    if not image_items and text_outputs:
+        for out_name, out_val in text_outputs.items():
+            if isinstance(out_val, dict) and out_val.get("type") == "image":
+                if "path" in out_val:
+                    p = out_val["path"]
+                    image_items.append((Path(p).name, None, p))
+                elif "paths" in out_val:
+                    for p in out_val["paths"]:
+                        image_items.append((Path(p).name, None, p))
+
+    if image_items:
+        source_media_id = params.get("parent_media_id_override") or params.get("source_media_id")
         source_person_id = params.get("target_person_id")
         source_album_id = params.get("result_album_id")
 
@@ -752,25 +1067,46 @@ async def _run_custom_workflow(
                         source_media_id = mid_val
                         break
 
-        # Try to get person/album from source media
-        if source_media_id and (not source_person_id or not source_album_id):
+        # Determine which image to inherit person/album from
+        # For face_swap: default to face_ref (the person whose face appears in result)
+        # The "result_owner" param lets users override: "face_ref" or "base_image"
+        owner_media_id = None
+        if wf_category == "face_swap":
+            result_owner = params.get("result_owner", "face_ref")
+            owner_media_id = params.get(result_owner)
+
+        # Fall back to source_media_id if no owner resolved
+        if not owner_media_id:
+            owner_media_id = source_media_id
+
+        # Try to get person/album from the owner media
+        if owner_media_id and (not source_person_id or not source_album_id):
             db = SessionLocal()
             try:
-                source = db.get(Media, source_media_id)
-                if source:
-                    source_person_id = source_person_id or source.person_id
-                    source_album_id = source_album_id or source.album_id
+                owner = db.get(Media, owner_media_id)
+                if owner:
+                    source_person_id = source_person_id or owner.person_id
+                    # Only inherit album_id if it belongs to the same person
+                    # (constraint: Media.person_id == Album.person_id when album_id is set)
+                    if not source_album_id and owner.album_id and owner.person_id == source_person_id:
+                        source_album_id = owner.album_id
             finally:
                 db.close()
 
         out_dir = settings.generated_dir(wf_category)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        for filename, data in results:
+        for filename, data, existing_path in image_items:
             ext = Path(filename).suffix or ".png"
             out_name = f"{wf_category}_{uuid.uuid4().hex[:8]}{ext}"
             out_path = out_dir / out_name
-            await client.save_image(data, str(out_path))
+
+            if data is not None:
+                # SaveImage result — write data to file
+                await client.save_image(data, str(out_path))
+            else:
+                # output_mapping image — move from preview cache to generated dir
+                shutil.move(existing_path, str(out_path))
 
             width, height = _get_image_dimensions(str(out_path))
 

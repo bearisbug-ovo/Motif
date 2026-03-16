@@ -1,0 +1,368 @@
+{
+  "34": {
+    "inputs": {
+      "samples": [
+        "65",
+        0
+      ],
+      "vae": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "36": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "34",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "@保存图像"
+    }
+  },
+  "37": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "39": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "40": {
+    "inputs": {
+      "strength": 1,
+      "model": [
+        "41",
+        0
+      ]
+    },
+    "class_type": "CFGNorm",
+    "_meta": {
+      "title": "CFG归一化"
+    }
+  },
+  "41": {
+    "inputs": {
+      "shift": 3.1,
+      "model": [
+        "69",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "42": {
+    "inputs": {
+      "seed": 895546528901028,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "40",
+        0
+      ],
+      "positive": [
+        "43",
+        0
+      ],
+      "negative": [
+        "44",
+        0
+      ],
+      "latent_image": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "@K采样器"
+    }
+  },
+  "43": {
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "77",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "Edit Model Reference Method"
+    }
+  },
+  "44": {
+    "inputs": {
+      "reference_latents_method": "index_timestep_zero",
+      "conditioning": [
+        "53",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "Edit Model Reference Method"
+    }
+  },
+  "46": {
+    "inputs": {
+      "image": "1 (2).jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "@加载图像1"
+    }
+  },
+  "47": {
+    "inputs": {
+      "image": "10012.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "@加载图像2"
+    }
+  },
+  "48": {
+    "inputs": {
+      "prompt": [
+        "74",
+        0
+      ],
+      "clip": [
+        "56",
+        0
+      ],
+      "vae": [
+        "37",
+        0
+      ],
+      "image1": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "文本编码（QwenImageEditPlus）"
+    }
+  },
+  "49": {
+    "inputs": {
+      "width": 1280,
+      "height": 1280,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "空Latent图像（SD3）"
+    }
+  },
+  "52": {
+    "inputs": {
+      "pixels": [
+        "39",
+        0
+      ],
+      "vae": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "53": {
+    "inputs": {
+      "prompt": "",
+      "clip": [
+        "56",
+        0
+      ],
+      "vae": [
+        "37",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "文本编码（QwenImageEditPlus）"
+    }
+  },
+  "55": {
+    "inputs": {
+      "unet_name": "Qwen-Rapid-NSFW-v18.1_Q4_K.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF)"
+    }
+  },
+  "56": {
+    "inputs": {
+      "clip_name": "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+      "type": "qwen_image"
+    },
+    "class_type": "CLIPLoaderGGUF",
+    "_meta": {
+      "title": "CLIPLoader (GGUF)"
+    }
+  },
+  "65": {
+    "inputs": {
+      "anything": [
+        "42",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "清理显存占用"
+    }
+  },
+  "66": {
+    "inputs": {
+      "lora_name": "Qwen-Image-Edit-F2P一致性.safetensors",
+      "strength_model": 1,
+      "model": [
+        "55",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "69": {
+    "inputs": {
+      "boolean": true,
+      "on_true": [
+        "66",
+        0
+      ],
+      "on_false": [
+        "55",
+        0
+      ]
+    },
+    "class_type": "Switch any [Crystools]",
+    "_meta": {
+      "title": "@人物一致lora🪛 Switch any"
+    }
+  },
+  "70": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "47",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "73": {
+    "inputs": {},
+    "class_type": "easy isNone",
+    "_meta": {
+      "title": "是否为空"
+    }
+  },
+  "74": {
+    "inputs": {
+      "text": "让图二中的人物穿上图一中人物的衣服，摆出图一中人物的动作",
+      "prefix": "Select the prefix add to the text",
+      "subject": "👤Select the subject add to the text",
+      "action": "🎬Select the action add to the text",
+      "clothes": "👚Select the clothes add to the text",
+      "environment": "☀️Select the illumination environment add to the text",
+      "background": "🎞️Select the background add to the text",
+      "nsfw": "🔞Select the nsfw add to the text"
+    },
+    "class_type": "easy prompt",
+    "_meta": {
+      "title": "@提示词"
+    }
+  },
+  "75": {
+    "inputs": {
+      "prompt": [
+        "74",
+        0
+      ],
+      "clip": [
+        "56",
+        0
+      ],
+      "vae": [
+        "37",
+        0
+      ],
+      "image1": [
+        "39",
+        0
+      ],
+      "image2": [
+        "70",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEditPlus",
+    "_meta": {
+      "title": "文本编码（QwenImageEditPlus）"
+    }
+  },
+  "77": {
+    "inputs": {
+      "boolean": false,
+      "on_true": [
+        "75",
+        0
+      ],
+      "on_false": [
+        "48",
+        0
+      ]
+    },
+    "class_type": "Switch any [Crystools]",
+    "_meta": {
+      "title": "@双图像输入🪛 Switch any"
+    }
+  }
+}

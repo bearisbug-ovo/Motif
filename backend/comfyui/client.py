@@ -15,6 +15,11 @@ COMFYUI_WS = COMFYUI_URL.replace("http://", "ws://").replace("https://", "wss://
 _TIMEOUT = aiohttp.ClientTimeout(connect=10, sock_connect=10, sock_read=None)
 
 
+# Module-level cache for /object_info results, shared across all client instances.
+# Keyed by class_type name → node definition dict.
+_object_info_cache: dict[str, dict] = {}
+
+
 class ComfyUIClient:
     def __init__(self, base_url: str = COMFYUI_URL):
         self.base_url = base_url.rstrip("/")
@@ -48,11 +53,14 @@ class ComfyUIClient:
         self,
         prompt_id: str,
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
+        idle_timeout: float = 120,
     ) -> None:
         ws_endpoint = f"{self.ws_url}/ws?clientId={self.client_id}"
         async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
-            async with session.ws_connect(ws_endpoint) as ws:
-                async for msg in ws:
+            async with session.ws_connect(ws_endpoint, heartbeat=30) as ws:
+                while True:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=idle_timeout)
+
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         data = json.loads(msg.data)
                         msg_type = data.get("type")
@@ -75,7 +83,10 @@ class ComfyUIClient:
                                 raise RuntimeError(f"ComfyUI execution error: {err}")
 
                     elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
-                        break
+                        raise RuntimeError(
+                            "ComfyUI WebSocket disconnected unexpectedly — "
+                            "ComfyUI may have crashed or restarted"
+                        )
 
     # ------------------------------------------------------------------ #
     # Get output images for a prompt                                       #
@@ -140,6 +151,46 @@ class ComfyUIClient:
                 return result.get("name", filename)
 
     # ------------------------------------------------------------------ #
+    # Get node class definitions from /object_info                         #
+    # Returns {class_type: {input: {required: ..., optional: ...}, ...}}   #
+    # ------------------------------------------------------------------ #
+    async def get_object_info(self, class_types: list[str] | None = None) -> dict:
+        """Fetch node definitions from ComfyUI /object_info.
+
+        Results are cached in the module-level ``_object_info_cache``.
+        On success the cache is updated; on failure (ComfyUI offline)
+        cached values are returned.
+        """
+        global _object_info_cache
+        result = {}
+        try:
+            async with aiohttp.ClientSession(timeout=_TIMEOUT) as session:
+                if class_types:
+                    for ct in class_types:
+                        try:
+                            async with session.get(f"{self.base_url}/object_info/{ct}") as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    result.update(data)
+                                    _object_info_cache.update(data)
+                        except Exception:
+                            if ct in _object_info_cache:
+                                result[ct] = _object_info_cache[ct]
+                else:
+                    async with session.get(f"{self.base_url}/object_info") as resp:
+                        resp.raise_for_status()
+                        result = await resp.json()
+                        _object_info_cache.update(result)
+        except Exception:
+            if class_types:
+                for ct in class_types:
+                    if ct in _object_info_cache:
+                        result[ct] = _object_info_cache[ct]
+            else:
+                result = dict(_object_info_cache)
+        return result
+
+    # ------------------------------------------------------------------ #
     # Free model cache (releases VRAM)                                     #
     # ------------------------------------------------------------------ #
     async def free_cache(self) -> None:
@@ -182,7 +233,12 @@ class ComfyUIClient:
     ) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]], str]:
         """Returns (saved_images, preview_images, prompt_id)."""
         prompt_id = await self.submit(workflow)
-        await self.watch_progress_ws(prompt_id, on_progress)
+        try:
+            await self.watch_progress_ws(prompt_id, on_progress)
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                "ComfyUI 超过 120 秒无响应 — 可能已卡死或 GPU 被其他程序占用"
+            )
         saved, preview = await self.get_output_images(prompt_id)
         return saved, preview, prompt_id
 

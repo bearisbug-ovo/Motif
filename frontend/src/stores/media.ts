@@ -1,14 +1,9 @@
 import { create } from 'zustand'
 import { mediaApi, MediaItem, MediaSortField } from '@/api/media'
-import { getSortDefault, getFilterDefault, SortPageKey } from '@/lib/filterDefaults'
+import { getSortDefault, getFilterDefault, SortPageKey, parseSortValue } from '@/lib/filterDefaults'
+import { useLightboxStore, type LightboxContext } from '@/stores/lightbox'
 
-interface LightboxContext {
-  albumId?: string
-  personId?: string
-  onCoverSet?: () => void
-  exploreMode?: boolean
-  onReshuffle?: () => void
-}
+export type { LightboxContext }
 
 // Global callback for when a rating changes — pages can subscribe to refetch parent entities
 let _onRatingChangeCallback: (() => void) | null = null
@@ -16,13 +11,21 @@ export function setOnRatingChange(cb: (() => void) | null) {
   _onRatingChangeCallback = cb
 }
 
+// Global callback for when media is deleted — pages can subscribe to refresh counts/local state
+let _onDeleteCallback: ((ids: string[]) => void) | null = null
+export function setOnDelete(cb: ((ids: string[]) => void) | null) {
+  _onDeleteCallback = cb
+}
+
 interface MediaStore {
   items: MediaItem[]
   looseItems: MediaItem[]
+  looseTotal: number  // unfiltered count — for section visibility
   loading: boolean
-  sort: MediaSortField
+  sort: string
   filterRating: string | undefined
   sourceType: string | undefined
+  mediaType: string | undefined
   lightboxIndex: number | null
   lightboxItems: MediaItem[]
   lightboxContext: LightboxContext
@@ -31,13 +34,14 @@ interface MediaStore {
   multiSelectMode: boolean
   selectedIds: Set<string>
 
-  fetchByAlbum: (albumId: string) => Promise<void>
-  fetchLoose: (personId: string) => Promise<void>
+  fetchByAlbum: (albumId: string, overrides?: { sort?: string; filterRating?: string; sourceType?: string; mediaType?: string }) => Promise<void>
+  fetchLoose: (personId: string, overrides?: { sort?: string; filterRating?: string; sourceType?: string; mediaType?: string }) => Promise<void>
   updateMedia: (id: string, data: { rating?: number | null; album_id?: string; person_id?: string }) => Promise<void>
-  softDelete: (id: string) => Promise<void>
-  setSort: (sort: MediaSortField) => void
+  softDelete: (id: string, mode?: 'cascade' | 'reparent') => Promise<void>
+  setSort: (sort: string) => void
   setFilterRating: (f: string | undefined) => void
   setSourceType: (t: string | undefined) => void
+  setMediaType: (t: string | undefined) => void
   resetFilters: (pageKey: SortPageKey) => void
   openLightbox: (items: MediaItem[], index: number, context?: LightboxContext) => void
   closeLightbox: () => void
@@ -50,17 +54,20 @@ interface MediaStore {
   selectAll: () => void
   clearSelection: () => void
   batchRate: (rating: number) => Promise<void>
-  batchDelete: () => Promise<void>
+  batchDelete: (mode?: 'cascade' | 'reparent') => Promise<void>
   batchMoveToAlbum: (albumId: string) => Promise<void>
+  replaceItem: (updated: MediaItem) => void
 }
 
 export const useMediaStore = create<MediaStore>((set, get) => ({
   items: [],
   looseItems: [],
+  looseTotal: 0,
   loading: false,
-  sort: 'sort_order',
+  sort: 'sort_order:asc',
   filterRating: undefined,
   sourceType: undefined,
+  mediaType: undefined,
   lightboxIndex: null,
   lightboxItems: [],
   lightboxContext: {},
@@ -68,23 +75,37 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
   multiSelectMode: false,
   selectedIds: new Set<string>(),
 
-  fetchByAlbum: async (albumId) => {
+  fetchByAlbum: async (albumId, overrides?: { sort?: string; filterRating?: string; sourceType?: string; mediaType?: string }) => {
     set({ loading: true })
     try {
-      const { sort, filterRating, sourceType } = get()
-      const items = await mediaApi.listByAlbum(albumId, { sort, filter_rating: filterRating, source_type: sourceType })
+      const state = get()
+      const sort = overrides?.sort ?? state.sort
+      const filterRating = overrides?.filterRating !== undefined ? overrides.filterRating : state.filterRating
+      const sourceType = overrides?.sourceType !== undefined ? overrides.sourceType : state.sourceType
+      const mediaType = overrides?.mediaType !== undefined ? overrides.mediaType : state.mediaType
+      const { field, dir } = parseSortValue(sort)
+      const items = await mediaApi.listByAlbum(albumId, { sort: field as MediaSortField, sort_dir: dir, filter_rating: filterRating, source_type: sourceType, media_type: mediaType })
       set({ items, loading: false })
     } catch {
       set({ loading: false })
     }
   },
 
-  fetchLoose: async (personId) => {
+  fetchLoose: async (personId, overrides?: { sort?: string; filterRating?: string; sourceType?: string; mediaType?: string }) => {
     set({ loading: true })
     try {
-      const { sort, filterRating, sourceType } = get()
-      const looseItems = await mediaApi.listLoose(personId, { sort, filter_rating: filterRating, source_type: sourceType })
-      set({ looseItems, loading: false })
+      const state = get()
+      const sort = overrides?.sort ?? state.sort
+      const filterRating = overrides?.filterRating !== undefined ? overrides.filterRating : state.filterRating
+      const sourceType = overrides?.sourceType !== undefined ? overrides.sourceType : state.sourceType
+      const mediaType = overrides?.mediaType !== undefined ? overrides.mediaType : state.mediaType
+      const { field, dir } = parseSortValue(sort)
+      const hasFilters = !!(sourceType || filterRating || mediaType)
+      const [looseItems, unfilteredItems] = await Promise.all([
+        mediaApi.listLoose(personId, { sort: field as MediaSortField, sort_dir: dir, filter_rating: filterRating, source_type: sourceType, media_type: mediaType }),
+        hasFilters ? mediaApi.listLoose(personId, { sort: 'created_at', sort_dir: 'desc' }) : Promise.resolve(null),
+      ])
+      set({ looseItems, looseTotal: unfilteredItems !== null ? unfilteredItems.length : looseItems.length, loading: false })
     } catch {
       set({ loading: false })
     }
@@ -97,55 +118,110 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
     set((s) => ({
       items: s.items.map((x) => (x.id === id ? m : x)),
       looseItems: s.looseItems.map((x) => (x.id === id ? m : x)),
-      lightboxItems: s.lightboxItems.map((x) => (x.id === id ? m : x)),
     }))
+    // Sync to lightbox store
+    const lbState = useLightboxStore.getState()
+    if (lbState.isOpen) {
+      useLightboxStore.setState({
+        localItems: lbState.localItems.map(x => x.id === id ? m : x),
+        chainFlat: lbState.chainFlat.map(x => x.id === id ? m : x),
+        currentItem: lbState.currentItem?.id === id ? m : lbState.currentItem,
+      })
+    }
     // Notify parent page to refetch album/person ratings
     if (data.rating !== undefined) _onRatingChangeCallback?.()
   },
 
-  softDelete: async (id) => {
-    await mediaApi.softDelete(id)
-    set((s) => {
-      const newLightboxItems = s.lightboxItems.filter((x) => x.id !== id)
-      let newLightboxIndex = s.lightboxIndex
-      if (newLightboxIndex !== null) {
-        if (newLightboxItems.length === 0) {
-          newLightboxIndex = null
-        } else if (newLightboxIndex >= newLightboxItems.length) {
-          newLightboxIndex = newLightboxItems.length - 1
+  softDelete: async (id, mode = 'cascade') => {
+    await mediaApi.softDelete(id, mode)
+    // Update lightbox store
+    const lbState = useLightboxStore.getState()
+    if (lbState.isOpen) {
+      const newLocalItems = lbState.localItems.filter(x => x.id !== id)
+      const newChainFlat = lbState.chainFlat.filter(x => x.id !== id)
+      let newLocalIndex = lbState.localIndex
+      let newChainIndex = lbState.chainIndex
+      let newCurrentItem = lbState.currentItem
+
+      if (lbState.currentItem?.id === id) {
+        // Current item was deleted
+        if (newChainIndex >= 0) {
+          // Was viewing a chain item
+          if (newChainFlat.length > 0) {
+            newChainIndex = Math.min(newChainIndex, newChainFlat.length - 1)
+            newCurrentItem = newChainFlat[newChainIndex]
+          } else {
+            newChainIndex = -1
+            newCurrentItem = newLocalItems[newLocalIndex] || null
+          }
+        } else {
+          // Was viewing a local item
+          if (newLocalItems.length === 0) {
+            useLightboxStore.getState().close()
+          } else {
+            newLocalIndex = Math.min(newLocalIndex, newLocalItems.length - 1)
+            newCurrentItem = newLocalItems[newLocalIndex]
+          }
         }
       }
-      return {
-        items: s.items.filter((x) => x.id !== id),
-        looseItems: s.looseItems.filter((x) => x.id !== id),
-        lightboxItems: newLightboxItems,
-        lightboxIndex: newLightboxIndex,
+
+      if (newLocalItems.length > 0) {
+        useLightboxStore.setState({
+          localItems: newLocalItems,
+          localIndex: newLocalIndex,
+          chainFlat: newChainFlat,
+          chainIndex: newChainIndex,
+          currentItem: newCurrentItem,
+          chainCache: new Map(),
+        })
       }
-    })
+    }
+
+    set((s) => ({
+      items: s.items.filter((x) => x.id !== id),
+      looseItems: s.looseItems.filter((x) => x.id !== id),
+    }))
+    _onDeleteCallback?.([id])
   },
 
   setSort: (sort) => set({ sort }),
   setFilterRating: (filterRating) => set({ filterRating }),
   setSourceType: (sourceType) => set({ sourceType }),
+  setMediaType: (mediaType) => set({ mediaType }),
   resetFilters: (pageKey) => set({
-    sort: getSortDefault(pageKey) as MediaSortField,
+    sort: getSortDefault(pageKey),
     filterRating: getFilterDefault('filterRating') || undefined,
     sourceType: getFilterDefault('sourceType') || undefined,
+    mediaType: getFilterDefault('mediaType') || undefined,
   }),
 
-  openLightbox: (lightboxItems, lightboxIndex, lightboxContext = {}) => set({ lightboxItems, lightboxIndex, lightboxContext }),
-  closeLightbox: () => set({ lightboxIndex: null, lightboxItems: [], lightboxContext: {} }),
+  openLightbox: (items, index, ctx = {}) => {
+    // Inject current sort/filter state so LightBox preserves ordering across albums
+    const { sort, filterRating, sourceType, mediaType } = get()
+    const { field, dir } = parseSortValue(sort)
+    const enrichedCtx: LightboxContext = {
+      ...ctx,
+      sort: field,
+      sortDir: dir,
+      filterRating,
+      sourceType,
+      mediaType,
+    }
+    useLightboxStore.getState().open(items, index, enrichedCtx)
+    // Sync to legacy fields for backward compat
+    set({ lightboxItems: items, lightboxIndex: index, lightboxContext: enrichedCtx })
+  },
+  closeLightbox: () => {
+    useLightboxStore.getState().close()
+    set({ lightboxIndex: null, lightboxItems: [], lightboxContext: {} })
+  },
 
   lightboxNext: () => {
-    const { lightboxIndex, lightboxItems } = get()
-    if (lightboxIndex === null) return
-    set({ lightboxIndex: Math.min(lightboxIndex + 1, lightboxItems.length - 1) })
+    useLightboxStore.getState().navigateH(1)
   },
 
   lightboxPrev: () => {
-    const { lightboxIndex } = get()
-    if (lightboxIndex === null) return
-    set({ lightboxIndex: Math.max(lightboxIndex - 1, 0) })
+    useLightboxStore.getState().navigateH(-1)
   },
 
   // Multi-select
@@ -178,17 +254,18 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
     _onRatingChangeCallback?.()
   },
 
-  batchDelete: async () => {
+  batchDelete: async (mode = 'cascade') => {
     const { selectedIds } = get()
     const ids = [...selectedIds]
     if (ids.length === 0) return
-    await mediaApi.batchDelete(ids)
+    await mediaApi.batchDelete(ids, mode)
     set((s) => ({
       items: s.items.filter((m) => !ids.includes(m.id)),
       looseItems: s.looseItems.filter((m) => !ids.includes(m.id)),
       selectedIds: new Set(),
       multiSelectMode: false,
     }))
+    _onDeleteCallback?.(ids)
   },
 
   batchMoveToAlbum: async (albumId) => {
@@ -197,5 +274,21 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
     if (ids.length === 0) return
     await mediaApi.batchUpdate({ ids, album_id: albumId })
     set({ selectedIds: new Set(), multiSelectMode: false })
+  },
+
+  replaceItem: (updated) => {
+    set((s) => ({
+      items: s.items.map((x) => (x.id === updated.id ? updated : x)),
+      looseItems: s.looseItems.map((x) => (x.id === updated.id ? updated : x)),
+    }))
+    // Sync to lightbox
+    const lbState = useLightboxStore.getState()
+    if (lbState.isOpen) {
+      useLightboxStore.setState({
+        localItems: lbState.localItems.map(x => x.id === updated.id ? updated : x),
+        chainFlat: lbState.chainFlat.map(x => x.id === updated.id ? updated : x),
+        currentItem: lbState.currentItem?.id === updated.id ? updated : lbState.currentItem,
+      })
+    }
   },
 }))

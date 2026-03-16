@@ -14,6 +14,7 @@ from database import get_db
 from models.album import Album
 from models.media import Media
 from models.person import Person
+from models.tag import Tag, album_tags
 
 router = APIRouter()
 
@@ -28,6 +29,7 @@ class AlbumUpdate(BaseModel):
     name: Optional[str] = None
     cover_media_id: Optional[str] = None
     person_id: Optional[str] = None
+    tag_ids: Optional[list[str]] = None
 
 
 def _album_or_404(aid: str, db: Session) -> Album:
@@ -57,6 +59,13 @@ def _album_dict(a: Album, db: Session) -> dict:
         ).scalar()
         cover_file_path = first
 
+    # Tags
+    tag_rows = db.execute(
+        select(Tag).join(album_tags, album_tags.c.tag_id == Tag.id)
+        .where(album_tags.c.album_id == a.id)
+        .order_by(Tag.sort_order)
+    ).scalars().all()
+
     return {
         "id": a.id,
         "person_id": a.person_id,
@@ -67,8 +76,9 @@ def _album_dict(a: Album, db: Session) -> dict:
         "avg_rating": a.avg_rating,
         "rated_count": a.rated_count,
         "media_count": media_count,
-        "created_at": a.created_at.isoformat(),
-        "updated_at": a.updated_at.isoformat(),
+        "tags": [{"id": t.id, "name": t.name} for t in tag_rows],
+        "created_at": a.created_at.isoformat() + "Z",
+        "updated_at": a.updated_at.isoformat() + "Z",
     }
 
 
@@ -76,12 +86,25 @@ def _album_dict(a: Album, db: Session) -> dict:
 def list_albums(
     person_id: Optional[str] = None,
     sort: str = Query("created_at", regex="^(created_at|avg_rating|name)$"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$"),
     filter_rating: Optional[str] = Query(None),
+    tag_ids: Optional[str] = Query(None, description="comma-separated tag IDs (intersection filter)"),
     db: Session = Depends(get_db),
 ):
+    from sqlalchemy import asc as sa_asc, desc as sa_desc
+
     q = select(Album)
     if person_id:
         q = q.where(Album.person_id == person_id)
+
+    if tag_ids:
+        tid_list = [t.strip() for t in tag_ids.split(",") if t.strip()]
+        for tid in tid_list:
+            q = q.where(
+                Album.id.in_(
+                    select(album_tags.c.album_id).where(album_tags.c.tag_id == tid)
+                )
+            )
 
     if filter_rating:
         try:
@@ -96,12 +119,15 @@ def list_albums(
         elif op == "lte":
             q = q.where(Album.avg_rating <= val_int)
 
+    direction = sa_asc if sort_dir == "asc" else sa_desc
     if sort == "avg_rating":
-        q = q.order_by(Album.avg_rating.desc().nullslast(), Album.created_at.desc())
+        col = direction(Album.avg_rating)
+        col = col.nullslast() if sort_dir == "desc" else col.nullsfirst()
+        q = q.order_by(col, Album.created_at.desc())
     elif sort == "name":
-        q = q.order_by(Album.name.asc())
+        q = q.order_by(direction(Album.name))
     else:
-        q = q.order_by(Album.created_at.desc())
+        q = q.order_by(direction(Album.created_at))
 
     albums = db.execute(q).scalars().all()
     return [_album_dict(a, db) for a in albums]
@@ -142,6 +168,12 @@ def update_album(aid: str, body: AlbumUpdate, db: Session = Depends(get_db)):
         ).scalars().all()
         for m in media_items:
             m.person_id = a.person_id
+    if body.tag_ids is not None:
+        db.execute(album_tags.delete().where(album_tags.c.album_id == aid))
+        for tid in body.tag_ids:
+            tag = db.get(Tag, tid)
+            if tag:
+                db.execute(album_tags.insert().values(album_id=aid, tag_id=tid))
     a.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(a)
@@ -156,7 +188,8 @@ def update_album(aid: str, body: AlbumUpdate, db: Session = Depends(get_db)):
 @router.delete("/{aid}", status_code=204)
 def delete_album(
     aid: str,
-    mode: str = Query("album_only", regex="^(album_only|album_and_media)$"),
+    mode: str = Query("album_only", regex="^(album_only|album_and_media|move_to_album)$"),
+    target_album_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     a = _album_or_404(aid, db)
@@ -172,6 +205,15 @@ def delete_album(
         for m in media_items:
             m.is_deleted = True
             m.deleted_at = now
+    elif mode == "move_to_album" and target_album_id:
+        # Move media to another album
+        target = db.get(Album, target_album_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="Target album not found")
+        for m in media_items:
+            m.album_id = target_album_id
+            if target.person_id:
+                m.person_id = target.person_id
     else:
         # Detach media — become loose images under the person
         for m in media_items:
@@ -184,6 +226,42 @@ def delete_album(
     if person_id:
         from routers.media import _recalc_person_rating
         _recalc_person_rating(person_id, db)
+    # Recalc target album's person rating if moved
+    if mode == "move_to_album" and target_album_id:
+        target = db.get(Album, target_album_id)
+        if target and target.person_id and target.person_id != person_id:
+            from routers.media import _recalc_person_rating
+            _recalc_person_rating(target.person_id, db)
+
+
+@router.post("/cleanup-empty")
+def cleanup_empty_albums(person_id: str | None = None, db: Session = Depends(get_db)):
+    """Delete all albums that have zero non-deleted media."""
+    # Find albums with no active media
+    media_count_sq = (
+        select(func.count(Media.id))
+        .where(Media.album_id == Album.id, Media.is_deleted == False)
+        .correlate(Album)
+        .scalar_subquery()
+    )
+    query = select(Album).where(media_count_sq == 0)
+    if person_id:
+        query = query.where(Album.person_id == person_id)
+    empty_albums = db.execute(query).scalars().all()
+
+    if not empty_albums:
+        return {"deleted_count": 0, "deleted_albums": []}
+
+    deleted = []
+    affected_person_ids = set()
+    for a in empty_albums:
+        deleted.append({"id": a.id, "name": a.name, "person_id": a.person_id})
+        if a.person_id:
+            affected_person_ids.add(a.person_id)
+        db.delete(a)
+    db.commit()
+
+    return {"deleted_count": len(deleted), "deleted_albums": deleted}
 
 
 # Nested route: GET /persons/{pid}/albums
@@ -191,12 +269,25 @@ def delete_album(
 def list_albums_by_person(
     pid: str,
     sort: str = Query("created_at", regex="^(created_at|avg_rating|name)$"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$"),
     filter_rating: Optional[str] = Query(None),
+    tag_ids: Optional[str] = Query(None, description="comma-separated tag IDs (intersection filter)"),
     db: Session = Depends(get_db),
 ):
+    from sqlalchemy import asc as sa_asc, desc as sa_desc
+
     if not db.get(Person, pid):
         raise HTTPException(status_code=404, detail="Person not found")
     q = select(Album).where(Album.person_id == pid)
+
+    if tag_ids:
+        tid_list = [t.strip() for t in tag_ids.split(",") if t.strip()]
+        for tid in tid_list:
+            q = q.where(
+                Album.id.in_(
+                    select(album_tags.c.album_id).where(album_tags.c.tag_id == tid)
+                )
+            )
 
     if filter_rating:
         try:
@@ -211,11 +302,14 @@ def list_albums_by_person(
         elif op == "lte":
             q = q.where(Album.avg_rating <= val_int)
 
+    direction = sa_asc if sort_dir == "asc" else sa_desc
     if sort == "avg_rating":
-        q = q.order_by(Album.avg_rating.desc().nullslast(), Album.created_at.desc())
+        col = direction(Album.avg_rating)
+        col = col.nullslast() if sort_dir == "desc" else col.nullsfirst()
+        q = q.order_by(col, Album.created_at.desc())
     elif sort == "name":
-        q = q.order_by(Album.name.asc())
+        q = q.order_by(direction(Album.name))
     else:
-        q = q.order_by(Album.created_at.desc())
+        q = q.order_by(direction(Album.created_at))
     albums = db.execute(q).scalars().all()
     return [_album_dict(a, db) for a in albums]

@@ -53,6 +53,7 @@ export default {
         },
       },
       borderRadius: {
+        xl: 'calc(var(--radius) + 4px)',
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
@@ -87,6 +88,10 @@ export default {
           '85%': { filter: 'drop-shadow(0 0 2px rgba(232,160,192,0.3)) hue-rotate(0deg)' },
           '100%': { filter: 'drop-shadow(0 0 2px rgba(232,160,192,0.3)) hue-rotate(0deg)' },
         },
+        'fade-in-up': {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -94,6 +99,7 @@ export default {
         'star-pop': 'star-pop 0.35s ease-out',
         'star-pulse': 'star-pulse 4.5s ease-in-out infinite',
         'star-shimmer': 'star-shimmer 6s ease-in-out infinite',
+        'fade-in-up': 'fade-in-up 0.3s ease-out both',
       },
     },
   },

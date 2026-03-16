@@ -1,0 +1,154 @@
+{
+  "12": {
+    "inputs": {
+      "image": "image_to_image_8a9df0ae.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "@加载图像"
+    }
+  },
+  "22": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "28",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "@保存图像"
+    }
+  },
+  "24": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 0.1,
+      "resolution_steps": 1,
+      "image": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "@缩放图像（像素）"
+    }
+  },
+  "25": {
+    "inputs": {
+      "images": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "26": {
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "cuda:0",
+      "encode_tiled": true,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": true,
+      "decode_tile_size": 1024,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "cpu",
+      "cache_model": false
+    },
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "SeedVR2 (Down)Load VAE Model"
+    }
+  },
+  "27": {
+    "inputs": {
+      "model": "seedvr2_ema_3b_fp8_e4m3fn.safetensors",
+      "device": "cuda:0",
+      "blocks_to_swap": 32,
+      "swap_io_components": false,
+      "offload_device": "cpu",
+      "cache_model": false,
+      "attention_mode": "sdpa"
+    },
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "@SeedVR2 (Down)Load DiT Model"
+    }
+  },
+  "28": {
+    "inputs": {
+      "seed": 1689872030,
+      "resolution": 2048,
+      "max_resolution": 4500,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "color_correction": "lab",
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "cpu",
+      "enable_debug": false,
+      "image": [
+        "31",
+        0
+      ],
+      "dit": [
+        "27",
+        0
+      ],
+      "vae": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "SeedVR2VideoUpscaler",
+    "_meta": {
+      "title": "@SeedVR2 Video Upscaler (v2.5.24)"
+    }
+  },
+  "30": {
+    "inputs": {
+      "compare_view": {
+        "before": "/api/view?filename=comfy.compare.a_temp_mklpe_00001_.png&subfolder=&type=temp&rand=0.8480317463665602",
+        "after": "/api/view?filename=comfy.compare.b_temp_mklpe_00001_.png&subfolder=&type=temp&rand=0.8480317463665602"
+      },
+      "image_a": [
+        "12",
+        0
+      ],
+      "image_b": [
+        "28",
+        0
+      ]
+    },
+    "class_type": "ImageCompare",
+    "_meta": {
+      "title": "图像对比"
+    }
+  },
+  "31": {
+    "inputs": {
+      "boolean": false,
+      "on_true": [
+        "24",
+        0
+      ],
+      "on_false": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "Switch any [Crystools]",
+    "_meta": {
+      "title": "@启用预压缩"
+    }
+  }
+}

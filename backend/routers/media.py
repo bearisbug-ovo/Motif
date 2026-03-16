@@ -30,6 +30,11 @@ _import_jobs: dict[str, dict] = {}
 SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".avif", ".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 
+class ScanRequest(BaseModel):
+    paths: List[str]
+    recursive: bool = True
+
+
 class ImportRequest(BaseModel):
     paths: List[str]
     person_id: Optional[str] = None
@@ -75,10 +80,11 @@ def _media_dict(m: Media) -> dict:
         "width": m.width,
         "height": m.height,
         "file_size": m.file_size,
+        "playback_position": m.playback_position,
         "is_deleted": m.is_deleted,
-        "deleted_at": m.deleted_at.isoformat() if m.deleted_at else None,
-        "created_at": m.created_at.isoformat(),
-        "updated_at": m.updated_at.isoformat(),
+        "deleted_at": m.deleted_at.isoformat() + "Z" if m.deleted_at else None,
+        "created_at": m.created_at.isoformat() + "Z",
+        "updated_at": m.updated_at.isoformat() + "Z",
     }
 
 
@@ -101,6 +107,27 @@ def _resolve_paths(paths: List[str], recursive: bool = True) -> List[str]:
         elif os.path.isfile(p) and Path(p).suffix.lower() in SUPPORTED_EXTS:
             result.append(p)
     return result
+
+
+class ListFilesRequest(BaseModel):
+    paths: List[str]
+    recursive: bool = True
+
+
+@router.post("/list-files")
+def list_files(body: ListFilesRequest, db: Session = Depends(get_db)):
+    """Resolve directories / file paths to individual media files."""
+    files = _resolve_paths(body.paths, body.recursive)
+    # Batch check which files already exist in DB
+    existing_set: set[str] = set()
+    chunk_size = 900
+    for i in range(0, len(files), chunk_size):
+        chunk = files[i:i + chunk_size]
+        rows = db.execute(
+            select(Media.file_path).where(Media.file_path.in_(chunk), Media.is_deleted == False)
+        ).scalars().all()
+        existing_set.update(rows)
+    return {"files": [{"path": fp, "name": os.path.basename(fp), "media_type": _get_media_type(fp), "existing": fp in existing_set} for fp in files]}
 
 
 def _get_media_type(path: str) -> str:
@@ -126,11 +153,25 @@ def _do_import(files: List[str], person_id: Optional[str], album_id: Optional[st
                 job["status"] = "cancelled"
                 break
             try:
-                # Skip duplicates
+                # Skip duplicates (active records)
                 existing = db.execute(
                     select(Media).where(Media.file_path == fp, Media.is_deleted == False)
                 ).scalar_one_or_none()
                 if existing:
+                    job["skipped"] += 1
+                    job["done"] += 1
+                    continue
+
+                # Restore from recycle bin if soft-deleted record exists
+                deleted = db.execute(
+                    select(Media).where(Media.file_path == fp, Media.is_deleted == True)
+                ).scalar_one_or_none()
+                if deleted:
+                    deleted.is_deleted = False
+                    deleted.deleted_at = None
+                    deleted.person_id = effective_person_id
+                    deleted.album_id = album_id
+                    db.commit()
                     job["done"] += 1
                     continue
 
@@ -223,6 +264,42 @@ def _recalc_person_rating(person_id: str, db: Session) -> None:
         db.commit()
 
 
+@router.post("/scan")
+def scan_paths(body: ScanRequest, db: Session = Depends(get_db)):
+    """Scan paths and return total media file count + already-imported count per path.
+
+    Each path can be a directory or a file.  For directories, files are resolved
+    using the ``recursive`` flag.  Results are returned per-path so the frontend
+    can display per-subfolder stats.  A summary entry with ``path="_total"`` is
+    appended when multiple paths are provided.
+    """
+    results = []
+    grand_total = 0
+    grand_existing = 0
+    for p in body.paths:
+        files = _resolve_paths([p], recursive=body.recursive)
+        total = len(files)
+        if total == 0:
+            results.append({"path": p, "total": 0, "existing": 0})
+            continue
+        # Batch query: count files that already exist in DB (chunk to avoid
+        # SQLite variable limit of 999)
+        existing = 0
+        chunk_size = 900
+        for i in range(0, len(files), chunk_size):
+            chunk = files[i:i + chunk_size]
+            existing += db.execute(
+                select(func.count()).select_from(Media)
+                .where(Media.file_path.in_(chunk), Media.is_deleted == False)
+            ).scalar() or 0
+        results.append({"path": p, "total": total, "existing": existing})
+        grand_total += total
+        grand_existing += existing
+    if len(body.paths) > 1:
+        results.append({"path": "_total", "total": grand_total, "existing": grand_existing})
+    return {"results": results}
+
+
 @router.post("/import")
 async def import_media(body: ImportRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     if body.person_id and not db.get(Person, body.person_id):
@@ -235,7 +312,7 @@ async def import_media(body: ImportRequest, background_tasks: BackgroundTasks, d
         raise HTTPException(status_code=400, detail="No supported media files found in the given paths")
 
     token = str(uuid.uuid4())
-    _import_jobs[token] = {"total": len(files), "done": 0, "errors": [], "status": "running", "cancelled": False}
+    _import_jobs[token] = {"total": len(files), "done": 0, "skipped": 0, "errors": [], "status": "running", "cancelled": False}
 
     if len(files) > 500:
         # Background for large batches
@@ -246,7 +323,7 @@ async def import_media(body: ImportRequest, background_tasks: BackgroundTasks, d
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _do_import, files, body.person_id, body.album_id, token)
         job = _import_jobs[token]
-        return {"token": token, "total": job["total"], "done": job["done"], "errors": job["errors"], "mode": "sync"}
+        return {"token": token, "total": job["total"], "done": job["done"], "skipped": job["skipped"], "errors": job["errors"], "mode": "sync"}
 
 
 @router.get("/import/{token}")
@@ -294,6 +371,7 @@ def backfill_dimensions(db: Session = Depends(get_db)):
 def list_album_media(
     album_id: str,
     sort: str = Query("sort_order", regex="^(sort_order|created_at|rating)$"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$"),
     source_type: Optional[str] = Query(None),
     filter_rating: Optional[str] = Query(None),
     media_type: Optional[str] = Query(None),
@@ -303,14 +381,16 @@ def list_album_media(
         raise HTTPException(status_code=404, detail="Album not found")
     q = select(Media).where(Media.album_id == album_id, Media.is_deleted == False)
     q = _apply_filters(q, source_type, filter_rating, media_type)
-    q = _apply_sort(q, sort)
-    return [_media_dict(m) for m in db.execute(q).scalars().all()]
+    q = _apply_sort(q, sort, sort_dir)
+    items = [_media_dict(m) for m in db.execute(q).scalars().all()]
+    return _reorder_with_children(items) if not source_type else items
 
 
 @router.get("/person/{person_id}/loose")
 def list_loose_media(
     person_id: str,
     sort: str = Query("created_at", regex="^(sort_order|created_at|rating)$"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$"),
     source_type: Optional[str] = Query(None),
     filter_rating: Optional[str] = Query(None),
     media_type: Optional[str] = Query(None),
@@ -320,13 +400,15 @@ def list_loose_media(
         raise HTTPException(status_code=404, detail="Person not found")
     q = select(Media).where(Media.person_id == person_id, Media.album_id.is_(None), Media.is_deleted == False)
     q = _apply_filters(q, source_type, filter_rating, media_type)
-    q = _apply_sort(q, sort)
-    return [_media_dict(m) for m in db.execute(q).scalars().all()]
+    q = _apply_sort(q, sort, sort_dir)
+    items = [_media_dict(m) for m in db.execute(q).scalars().all()]
+    return _reorder_with_children(items) if not source_type else items
 
 
 @router.get("/uncategorized")
 def list_uncategorized_media(
     sort: str = Query("created_at", regex="^(sort_order|created_at|rating)$"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$"),
     source_type: Optional[str] = Query(None),
     filter_rating: Optional[str] = Query(None),
     media_type: Optional[str] = Query(None),
@@ -335,8 +417,9 @@ def list_uncategorized_media(
     """List media not associated with any person."""
     q = select(Media).where(Media.person_id.is_(None), Media.is_deleted == False)
     q = _apply_filters(q, source_type, filter_rating, media_type)
-    q = _apply_sort(q, sort)
-    return [_media_dict(m) for m in db.execute(q).scalars().all()]
+    q = _apply_sort(q, sort, sort_dir)
+    items = [_media_dict(m) for m in db.execute(q).scalars().all()]
+    return _reorder_with_children(items) if not source_type else items
 
 
 @router.get("/uncategorized/count")
@@ -355,15 +438,20 @@ def explore_media(
     filter_rating: Optional[str] = Query(None),
     source_type: Optional[str] = Query(None),
     media_type: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    """Return all media matching scope for random browsing."""
+    """Return media matching scope.  When *limit* is given the result is a
+    random sample of at most *limit* items (uses SQLite ``RANDOM()``).
+    Without *limit* all matching rows are returned (used by cleanup, etc.)."""
     q = select(Media).where(Media.is_deleted == False)
     if album_id:
         q = q.where(Media.album_id == album_id)
     elif person_id:
         q = q.where(Media.person_id == person_id)
     q = _apply_filters(q, source_type, filter_rating, media_type)
+    if limit:
+        q = q.order_by(func.random()).limit(limit)
     items = db.execute(q).scalars().all()
     return [_media_dict(m) for m in items]
 
@@ -400,6 +488,101 @@ def get_media_by_ids(body: ByIdsRequest, db: Session = Depends(get_db)):
     return [_media_dict(m) for m in items]
 
 
+@router.post("/fix-ownership")
+def fix_ownership_constraints(db: Session = Depends(get_db)):
+    """Fix media where person_id doesn't match album.person_id.
+
+    This can happen with old face_swap results. Affected media will have their
+    album_id cleared (becoming loose items under their person).
+    """
+    fixed = []
+    media_with_album = db.execute(
+        select(Media).where(
+            Media.album_id.isnot(None),
+            Media.is_deleted == False,
+        )
+    ).scalars().all()
+
+    for m in media_with_album:
+        album = db.get(Album, m.album_id)
+        if not album:
+            fixed.append({"id": m.id, "reason": "album_deleted", "old_album_id": m.album_id})
+            m.album_id = None
+        elif album.person_id and m.person_id and album.person_id != m.person_id:
+            fixed.append({
+                "id": m.id,
+                "reason": "person_mismatch",
+                "media_person_id": m.person_id,
+                "album_person_id": album.person_id,
+                "old_album_id": m.album_id,
+            })
+            m.album_id = None
+
+    if fixed:
+        db.commit()
+
+    return {"fixed_count": len(fixed), "fixed": fixed}
+
+
+@router.get("/{mid}/nav-context")
+def get_nav_context(
+    mid: str,
+    sort: str = Query("sort_order", regex="^(sort_order|created_at|rating)$"),
+    sort_dir: str = Query("asc", regex="^(asc|desc)$"),
+    source_type: Optional[str] = Query(None),
+    filter_rating: Optional[str] = Query(None),
+    media_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Return navigation context for LightBox dual-axis navigation."""
+    m = db.get(Media, mid)
+    if not m or m.is_deleted:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    album_id = m.album_id
+    person_id = m.person_id
+
+    # Local items in the current scope, respecting the caller's sort/filter
+    local_items = []
+    if album_id:
+        q = select(Media).where(
+            Media.album_id == album_id,
+            Media.is_deleted == False,
+        )
+        # Default source_type to "local" if not explicitly provided
+        q = _apply_filters(q, source_type or "local", filter_rating, media_type)
+        q = _apply_sort(q, sort, sort_dir)
+        local_items = [_media_dict(x) for x in db.execute(q).scalars().all()]
+    elif person_id:
+        # Loose items for this person
+        q = select(Media).where(
+            Media.person_id == person_id,
+            Media.album_id.is_(None),
+            Media.is_deleted == False,
+        )
+        q = _apply_filters(q, source_type or "local", filter_rating, media_type)
+        q = _apply_sort(q, sort if sort != "sort_order" else "created_at", sort_dir)
+        local_items = [_media_dict(x) for x in db.execute(q).scalars().all()]
+
+    # Album order for this person
+    album_order = []
+    if person_id:
+        q = select(Album.id).where(Album.person_id == person_id).order_by(Album.created_at.desc())
+        album_order = [row[0] for row in db.execute(q).all()]
+
+    # Person order
+    q = select(Person.id).order_by(Person.created_at.desc())
+    person_order = [row[0] for row in db.execute(q).all()]
+
+    return {
+        "album_id": album_id,
+        "person_id": person_id,
+        "local_items": local_items,
+        "album_order": album_order,
+        "person_order": person_order,
+    }
+
+
 @router.get("/{mid}")
 def get_media(mid: str, db: Session = Depends(get_db)):
     m = db.get(Media, mid)
@@ -411,15 +594,26 @@ def get_media(mid: str, db: Session = Depends(get_db)):
 @router.patch("/batch")
 def batch_update_media(body: BatchUpdate, db: Session = Depends(get_db)):
     updated = []
+    old_person_ids = set()
+    old_album_ids = set()
     for mid in body.ids:
         m = db.get(Media, mid)
         if not m or m.is_deleted:
             continue
+        if m.person_id:
+            old_person_ids.add(m.person_id)
+        if m.album_id:
+            old_album_ids.add(m.album_id)
         _apply_media_update(m, body, db)
         updated.append(mid)
     db.commit()
-    # Recalc ratings for affected albums/persons
+    # Recalc ratings for affected albums/persons (new)
     _recalc_from_ids(body.ids, db)
+    # Also recalc old albums/persons that lost media
+    for aid in old_album_ids:
+        _recalc_album_rating(aid, db)
+    for pid in old_person_ids:
+        _recalc_person_rating(pid, db)
     return {"updated": updated}
 
 
@@ -441,14 +635,77 @@ def update_media(mid: str, body: MediaUpdate, db: Session = Depends(get_db)):
     return _media_dict(m)
 
 
-@router.delete("/{mid}", status_code=204)
-def soft_delete_media(mid: str, db: Session = Depends(get_db)):
+@router.patch("/{mid}/progress", status_code=204)
+def save_playback_progress(mid: str, position: float = Query(...), db: Session = Depends(get_db)):
+    """Lightweight endpoint to save video playback position."""
+    m = db.get(Media, mid)
+    if not m or m.is_deleted:
+        raise HTTPException(status_code=404, detail="Media not found")
+    m.playback_position = position if position > 0 else None
+    db.commit()
+
+
+@router.get("/{mid}/descendants-count")
+def get_descendants_count(mid: str, db: Session = Depends(get_db)):
+    """Return the number of non-deleted descendants of a media item."""
     m = db.get(Media, mid)
     if not m:
         raise HTTPException(status_code=404, detail="Media not found")
-    _soft_delete_recursive(mid, db)
+    count = _count_descendants(mid, db)
+    return {"count": count}
+
+
+def _count_descendants(mid: str, db: Session, depth: int = 0) -> int:
+    if depth > 10:
+        return 0
+    children = db.execute(
+        select(Media).where(Media.parent_media_id == mid, Media.is_deleted == False)
+    ).scalars().all()
+    total = len(children)
+    for child in children:
+        total += _count_descendants(child.id, db, depth + 1)
+    return total
+
+
+@router.delete("/{mid}", status_code=204)
+def soft_delete_media(
+    mid: str,
+    mode: str = Query("cascade", regex="^(cascade|reparent)$"),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete a media item.
+
+    mode=cascade: also delete all descendants (default).
+    mode=reparent: reparent children to this item's parent, then delete only this item.
+    """
+    m = db.get(Media, mid)
+    if not m:
+        raise HTTPException(status_code=404, detail="Media not found")
+    if mode == "reparent":
+        _soft_delete_reparent(mid, db)
+    else:
+        _soft_delete_recursive(mid, db)
     db.commit()
     _update_ratings(m.person_id, m.album_id, db)
+
+
+def _soft_delete_reparent(mid: str, db: Session) -> None:
+    """Soft-delete a single media item and reparent its children to its parent."""
+    m = db.get(Media, mid)
+    if not m or m.is_deleted:
+        return
+    new_parent = m.parent_media_id  # may be None (root)
+    # Reparent children
+    children = db.execute(
+        select(Media).where(Media.parent_media_id == mid, Media.is_deleted == False)
+    ).scalars().all()
+    for child in children:
+        child.parent_media_id = new_parent
+        child.updated_at = datetime.utcnow()
+    # Now soft-delete the item itself
+    m.is_deleted = True
+    m.deleted_at = datetime.utcnow()
+    _handle_screenshot_thumbnail(m, db)
 
 
 def _soft_delete_recursive(mid: str, db: Session, depth: int = 0) -> None:
@@ -460,11 +717,19 @@ def _soft_delete_recursive(mid: str, db: Session, depth: int = 0) -> None:
         return
     m.is_deleted = True
     m.deleted_at = datetime.utcnow()
-    # If this is a screenshot used as a video's thumbnail, update the parent
+    _handle_screenshot_thumbnail(m, db)
+    children = db.execute(
+        select(Media).where(Media.parent_media_id == mid, Media.is_deleted == False)
+    ).scalars().all()
+    for child in children:
+        _soft_delete_recursive(child.id, db, depth + 1)
+
+
+def _handle_screenshot_thumbnail(m: Media, db: Session) -> None:
+    """If this is a screenshot used as a video's thumbnail, update the parent."""
     if m.source_type == "screenshot" and m.parent_media_id:
         parent = db.get(Media, m.parent_media_id)
         if parent and parent.media_type == "video" and parent.thumbnail_path == m.file_path:
-            # Find next available screenshot for this video
             next_screenshot = db.execute(
                 select(Media).where(
                     Media.parent_media_id == parent.id,
@@ -475,22 +740,23 @@ def _soft_delete_recursive(mid: str, db: Session, depth: int = 0) -> None:
             ).scalars().first()
             parent.thumbnail_path = next_screenshot.file_path if next_screenshot else None
             parent.updated_at = datetime.utcnow()
-    children = db.execute(
-        select(Media).where(Media.parent_media_id == mid, Media.is_deleted == False)
-    ).scalars().all()
-    for child in children:
-        _soft_delete_recursive(child.id, db, depth + 1)
 
 
 @router.post("/{mid}/detach")
 def detach_media(mid: str, db: Session = Depends(get_db)):
-    """Detach media from its generation chain."""
+    """Detach media from its generation chain.
+
+    The detached media becomes a local item (source_type='local').
+    Its descendants (children, grandchildren, ...) stay attached to it,
+    forming a new independent generation tree.
+    """
     m = db.get(Media, mid)
     if not m or m.is_deleted:
         raise HTTPException(status_code=404, detail="Media not found")
     m.parent_media_id = None
     m.workflow_type = None
     m.generation_params = None
+    m.source_type = "local"
     m.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(m)
@@ -583,6 +849,7 @@ async def capture_screenshot(
 
 class BatchDeleteRequest(BaseModel):
     ids: List[str]
+    mode: str = "cascade"  # cascade | reparent
 
 
 @router.post("/batch-delete", status_code=200)
@@ -590,6 +857,7 @@ def batch_delete(body: BatchDeleteRequest, db: Session = Depends(get_db)):
     deleted = []
     person_ids = set()
     album_ids = set()
+    delete_fn = _soft_delete_reparent if body.mode == "reparent" else _soft_delete_recursive
     for mid in body.ids:
         m = db.get(Media, mid)
         if m and not m.is_deleted:
@@ -597,7 +865,7 @@ def batch_delete(body: BatchDeleteRequest, db: Session = Depends(get_db)):
                 person_ids.add(m.person_id)
             if m.album_id:
                 album_ids.add(m.album_id)
-            _soft_delete_recursive(m.id, db)
+            delete_fn(m.id, db)
             deleted.append(mid)
     db.commit()
     for pid in person_ids:
@@ -605,6 +873,24 @@ def batch_delete(body: BatchDeleteRequest, db: Session = Depends(get_db)):
     for aid in album_ids:
         _update_ratings(None, aid, db)
     return {"deleted": deleted}
+
+
+@router.post("/batch-detach")
+def batch_detach(body: BatchDeleteRequest, db: Session = Depends(get_db)):
+    """Batch detach media from their generation chains."""
+    detached = []
+    for mid in body.ids:
+        m = db.get(Media, mid)
+        if m and not m.is_deleted and m.parent_media_id:
+            m.parent_media_id = None
+            m.workflow_type = None
+            m.generation_params = None
+            m.source_type = "local"
+            m.updated_at = datetime.utcnow()
+            detached.append(mid)
+    if detached:
+        db.commit()
+    return {"detached": detached}
 
 
 class RelocateRequest(BaseModel):
@@ -755,7 +1041,9 @@ def _build_tree(mid: str, db: Session, depth: int) -> dict:
     m = db.get(Media, mid)
     if not m:
         return {}
-    children_q = select(Media).where(Media.parent_media_id == mid, Media.is_deleted == False)
+    children_q = select(Media).where(
+        Media.parent_media_id == mid, Media.is_deleted == False
+    ).order_by(Media.created_at.asc())
     children = [_build_tree(c.id, db, depth + 1) for c in db.execute(children_q).scalars().all()]
     d = _media_dict(m)
     d["children"] = children
@@ -811,13 +1099,51 @@ def _apply_filters(q, source_type: Optional[str], filter_rating: Optional[str], 
     return q
 
 
-def _apply_sort(q, sort: str):
+def _apply_sort(q, sort: str, sort_dir: str = "desc"):
+    from sqlalchemy import asc as sa_asc, desc as sa_desc
+    direction = sa_asc if sort_dir == "asc" else sa_desc
     if sort == "rating":
-        return q.order_by(Media.rating.desc().nullslast(), Media.created_at.desc())
+        col = direction(Media.rating)
+        col = col.nullslast() if sort_dir == "desc" else col.nullsfirst()
+        return q.order_by(col, Media.created_at.desc())
     elif sort == "created_at":
-        return q.order_by(Media.created_at.desc())
+        return q.order_by(direction(Media.created_at))
     else:
-        return q.order_by(Media.sort_order.asc())
+        return q.order_by(direction(Media.sort_order))
+
+
+def _reorder_with_children(items: list) -> list:
+    """Reorder a flat media list so that children follow their parent in DFS order.
+
+    Root items (no parent_media_id, or parent not in list) keep their original
+    relative order.  Children of the same parent are sorted by created_at asc.
+    """
+    id_set = {item["id"] for item in items}
+    children_map: dict[str, list] = {}
+    roots: list = []
+
+    for item in items:
+        pid = item.get("parent_media_id")
+        if pid and pid in id_set:
+            children_map.setdefault(pid, []).append(item)
+        else:
+            roots.append(item)
+
+    # Sort children by created_at so siblings are chronological
+    for pid in children_map:
+        children_map[pid].sort(key=lambda x: x.get("created_at", ""))
+
+    result: list = []
+
+    def _dfs(item: dict) -> None:
+        result.append(item)
+        for child in children_map.get(item["id"], []):
+            _dfs(child)
+
+    for root in roots:
+        _dfs(root)
+
+    return result
 
 
 def _recalc_from_ids(ids: List[str], db: Session) -> None:
@@ -837,3 +1163,169 @@ def _recalc_from_ids(ids: List[str], db: Session) -> None:
             person_ids.add(a.person_id)
     for pid in person_ids:
         _recalc_person_rating(pid, db)
+
+
+# ── Crop & Trim endpoints ─────────────────────────────────────────────
+
+
+@router.post("/{mid}/crop")
+async def crop_media(
+    mid: str,
+    file: UploadFile = File(...),
+    overwrite: bool = Form(False),
+    person_id: Optional[str] = Form(None),
+    album_id: Optional[str] = Form(None),
+    link_parent: bool = Form(True),
+    db: Session = Depends(get_db),
+):
+    """Crop an image. overwrite=False creates new Media; overwrite=True replaces original."""
+    m = db.get(Media, mid)
+    if not m or m.is_deleted:
+        raise HTTPException(status_code=404, detail="Media not found")
+    if m.media_type != "image":
+        raise HTTPException(status_code=400, detail="Only images can be cropped")
+
+    settings = get_settings()
+    out_dir = settings.generated_dir("crop")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(m.file_path).suffix.lower() or ".png"
+    filename = f"{uuid.uuid4().hex}{ext}"
+    out_path = out_dir / filename
+    data = await file.read()
+    out_path.write_bytes(data)
+
+    # Get dimensions of cropped image
+    width, height, file_size = None, None, len(data)
+    try:
+        from PIL import Image as PILImage
+        with PILImage.open(out_path) as img:
+            width, height = img.size
+    except Exception:
+        pass
+
+    if overwrite:
+        # Save original path in generation_params
+        gen_params = {}
+        if m.generation_params:
+            try:
+                gen_params = json.loads(m.generation_params)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        gen_params["original_path"] = m.file_path
+        m.file_path = str(out_path)
+        m.width = width
+        m.height = height
+        m.file_size = file_size
+        m.generation_params = json.dumps(gen_params)
+        m.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(m)
+        _update_ratings(m.person_id, m.album_id, db)
+        return _media_dict(m)
+    else:
+        final_person_id = person_id or m.person_id
+        final_album_id = album_id or m.album_id
+        new_media = Media(
+            id=uuid.uuid4().hex,
+            person_id=final_person_id,
+            album_id=final_album_id,
+            file_path=str(out_path),
+            media_type="image",
+            source_type="screenshot",
+            parent_media_id=m.id if link_parent else None,
+            workflow_type="crop",
+            width=width,
+            height=height,
+            file_size=file_size,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(new_media)
+        db.commit()
+        db.refresh(new_media)
+        _update_ratings(new_media.person_id, new_media.album_id, db)
+        return _media_dict(new_media)
+
+
+@router.post("/{mid}/upload-crop")
+async def upload_crop(mid: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Save a temporary cropped image for workflow input. Returns the crop file path."""
+    m = db.get(Media, mid)
+    if not m or m.is_deleted:
+        raise HTTPException(status_code=404, detail="Media not found")
+    settings = get_settings()
+    crops_dir = settings.crops_cache_dir()
+    crops_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{mid}_{uuid.uuid4().hex[:8]}.png"
+    crop_path = crops_dir / filename
+    data = await file.read()
+    crop_path.write_bytes(data)
+    return {"crop_path": str(crop_path)}
+
+
+class TrimRequest(BaseModel):
+    start: float
+    end: float
+    precise: bool = False
+    person_id: Optional[str] = None
+    album_id: Optional[str] = None
+    link_parent: bool = True
+
+
+@router.post("/{mid}/trim")
+def trim_video(mid: str, body: TrimRequest, db: Session = Depends(get_db)):
+    """Trim a video segment. precise=True re-encodes for frame-accurate cuts."""
+    m = db.get(Media, mid)
+    if not m or m.is_deleted:
+        raise HTTPException(status_code=404, detail="Media not found")
+    if m.media_type != "video":
+        raise HTTPException(status_code=400, detail="Only videos can be trimmed")
+    if body.start >= body.end:
+        raise HTTPException(status_code=400, detail="start must be less than end")
+    if not os.path.exists(m.file_path):
+        raise HTTPException(status_code=404, detail="Source file not found on disk")
+
+    settings = get_settings()
+    out_dir = settings.generated_dir("trim")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(m.file_path).suffix.lower() or ".mp4"
+    filename = f"{uuid.uuid4().hex}{ext}"
+    out_path = out_dir / filename
+
+    ffmpeg = settings.ffmpeg_path()
+    if body.precise:
+        cmd = [ffmpeg, "-i", m.file_path, "-ss", str(body.start), "-to", str(body.end),
+               "-c:v", "libx264", "-c:a", "aac", "-y", str(out_path)]
+    else:
+        cmd = [ffmpeg, "-ss", str(body.start), "-to", str(body.end),
+               "-i", m.file_path, "-c", "copy", "-y", str(out_path)]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"ffmpeg error: {result.stderr[-500:]}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="ffmpeg timed out")
+
+    file_size = out_path.stat().st_size if out_path.exists() else None
+
+    final_person_id = body.person_id or m.person_id
+    final_album_id = body.album_id or m.album_id
+    new_media = Media(
+        id=uuid.uuid4().hex,
+        person_id=final_person_id,
+        album_id=final_album_id,
+        file_path=str(out_path),
+        media_type="video",
+        source_type="screenshot",
+        parent_media_id=m.id if body.link_parent else None,
+        workflow_type="trim",
+        generation_params=json.dumps({"start": body.start, "end": body.end, "precise": body.precise}),
+        file_size=file_size,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(new_media)
+    db.commit()
+    db.refresh(new_media)
+    return _media_dict(new_media)

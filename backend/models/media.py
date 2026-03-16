@@ -40,6 +40,7 @@ class Media(Base):
     width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    playback_position: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # seconds, for video resume
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

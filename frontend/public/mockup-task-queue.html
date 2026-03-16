@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任务队列 — Motif 静态预览</title>
+<style>
+  /* ── Motif dark theme tokens (from index.css .dark) ── */
+  :root {
+    --background: 45 5% 16%;
+    --foreground: 40 17% 92%;
+    --card: 48 5% 20%;
+    --card-foreground: 40 17% 92%;
+    --popover: 45 6% 14%;
+    --popover-foreground: 40 17% 92%;
+    --primary: 24 57% 62%;
+    --primary-foreground: 45 5% 10%;
+    --secondary: 48 5% 22%;
+    --secondary-foreground: 40 17% 92%;
+    --muted: 48 5% 22%;
+    --muted-foreground: 40 7% 50%;
+    --accent: 45 5% 23%;
+    --accent-foreground: 40 17% 92%;
+    --destructive: 0 63% 40%;
+    --destructive-foreground: 40 17% 92%;
+    --border: 50 5% 23%;
+    --input: 50 5% 23%;
+    --ring: 24 57% 62%;
+    --radius: 0.5rem;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Utilities ── */
+  .bg-background { background: hsl(var(--background)); }
+  .bg-card { background: hsl(var(--card)); }
+  .bg-muted { background: hsl(var(--muted)); }
+  .bg-accent { background: hsl(var(--accent)); }
+  .bg-primary { background: hsl(var(--primary)); }
+  .bg-border { background: hsl(var(--border)); }
+  .text-foreground { color: hsl(var(--foreground)); }
+  .text-muted { color: hsl(var(--muted-foreground)); }
+  .text-primary { color: hsl(var(--primary)); }
+  .text-destructive { color: hsl(var(--destructive)); }
+  .border-border { border-color: hsl(var(--border)); }
+
+  .flex { display: flex; }
+  .flex-col { flex-direction: column; }
+  .flex-1 { flex: 1 1 0%; }
+  .items-center { align-items: center; }
+  .items-end { align-items: flex-end; }
+  .justify-between { justify-content: space-between; }
+  .justify-center { justify-content: center; }
+  .gap-1 { gap: 4px; }
+  .gap-1\.5 { gap: 6px; }
+  .gap-2 { gap: 8px; }
+  .gap-3 { gap: 12px; }
+  .gap-4 { gap: 16px; }
+  .gap-6 { gap: 24px; }
+  .shrink-0 { flex-shrink: 0; }
+  .min-w-0 { min-width: 0; }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overflow-auto { overflow: auto; }
+  .overflow-hidden { overflow: hidden; }
+  .relative { position: relative; }
+  .sticky { position: sticky; }
+  .hidden { display: none; }
+
+  .rounded { border-radius: var(--radius); }
+  .rounded-lg { border-radius: var(--radius); }
+  .rounded-md { border-radius: calc(var(--radius) - 2px); }
+  .rounded-full { border-radius: 9999px; }
+  .border { border: 1px solid hsl(var(--border)); }
+  .border-b { border-bottom: 1px solid hsl(var(--border)); }
+
+  .p-3 { padding: 12px; }
+  .p-4 { padding: 16px; }
+  .px-3 { padding-left: 12px; padding-right: 12px; }
+  .px-4 { padding-left: 16px; padding-right: 16px; }
+  .px-6 { padding-left: 24px; padding-right: 24px; }
+  .py-1 { padding-top: 4px; padding-bottom: 4px; }
+  .py-4 { padding-top: 16px; padding-bottom: 16px; }
+  .py-6 { padding-top: 24px; padding-bottom: 24px; }
+  .pt-4 { padding-top: 16px; }
+  .pb-2 { padding-bottom: 8px; }
+  .mb-1 { margin-bottom: 4px; }
+  .mb-3 { margin-bottom: 12px; }
+  .ml-5 { margin-left: 20px; }
+  .pl-2 { padding-left: 8px; }
+  .mt-0\.5 { margin-top: 2px; }
+  .mt-1 { margin-top: 4px; }
+  .mt-1\.5 { margin-top: 6px; }
+  .mt-3 { margin-top: 12px; }
+  .mr-1 { margin-right: 4px; }
+  .space-y-2 > * + * { margin-top: 8px; }
+  .space-y-6 > * + * { margin-top: 24px; }
+
+  .text-xs { font-size: 12px; line-height: 1.5; }
+  .text-sm { font-size: 14px; line-height: 1.43; }
+  .text-lg { font-size: 18px; line-height: 1.56; }
+  .font-medium { font-weight: 500; }
+  .font-semibold { font-weight: 600; }
+
+  .h-full { height: 100%; }
+  .h-14 { height: 56px; }
+  .w-4 { width: 16px; }
+  .h-4 { height: 16px; }
+  .w-5 { width: 20px; }
+  .h-5 { height: 20px; }
+  .w-12 { width: 48px; }
+  .h-12 { height: 48px; }
+  .w-3 { width: 12px; }
+  .h-3 { height: 12px; }
+  .h-1\.5 { height: 6px; }
+  .aspect-square { aspect-ratio: 1; }
+  .h-screen { height: 100vh; }
+
+  .opacity-50 { opacity: 0.5; }
+  .opacity-75 { opacity: 0.75; }
+  .cursor-grab { cursor: grab; }
+  .text-center { text-align: center; }
+
+  /* ── Button styles ── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border-radius: calc(var(--radius) - 2px);
+    font-size: 13px;
+    font-weight: 500;
+    height: 32px;
+    padding: 0 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: none;
+    white-space: nowrap;
+  }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--foreground));
+  }
+  .btn-outline:hover { background: hsl(var(--accent)); }
+  .btn-primary {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-ghost {
+    background: transparent;
+    color: hsl(var(--muted-foreground));
+    border: none;
+    padding: 0 6px;
+  }
+  .btn-ghost:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+  .btn-amber {
+    background: hsl(36 90% 50%);
+    color: white;
+  }
+  .btn-amber:hover { background: hsl(36 90% 45%); }
+  .btn-destructive-text {
+    background: transparent;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--destructive));
+  }
+  .btn-destructive-text:hover { background: hsl(0 63% 40% / 0.1); }
+
+  /* ── Status badges ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .badge-running { background: hsl(217 91% 60% / 0.1); color: hsl(217 91% 60%); }
+  .badge-pending { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
+  .badge-completed { background: hsl(142 71% 45% / 0.1); color: hsl(142 71% 45%); }
+  .badge-failed { background: hsl(var(--destructive) / 0.1); color: hsl(var(--destructive)); }
+  .badge-category {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: calc(var(--radius) - 2px);
+  }
+  .badge-upscale { background: hsl(142 71% 45% / 0.15); color: hsl(142 71% 45%); }
+  .badge-faceswap { background: hsl(271 81% 56% / 0.15); color: hsl(271 81% 56%); }
+  .badge-inpaint { background: hsl(36 90% 50% / 0.15); color: hsl(36 90% 50%); }
+  .badge-chain { background: hsl(var(--primary) / 0.1); color: hsl(var(--primary)); }
+
+  /* ── Progress bar ── */
+  .progress-track {
+    flex: 1;
+    height: 6px;
+    background: hsl(var(--muted));
+    border-radius: 9999px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: hsl(217 91% 60%);
+    border-radius: 9999px;
+    transition: width 0.3s;
+  }
+
+  /* ── Thumbnail placeholder ── */
+  .thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: calc(var(--radius) - 2px);
+    background: hsl(var(--muted));
+    flex-shrink: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+  /* ── Task card ── */
+  .task-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--border));
+    padding: 12px;
+    background: hsl(var(--card));
+  }
+  .task-card-failed { border-color: hsl(var(--destructive) / 0.3); }
+
+  /* ── Section header icon ── */
+  .icon-spin {
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ── Config toggle ── */
+  .toggle-track {
+    width: 40px;
+    height: 20px;
+    border-radius: 9999px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-knob {
+    position: absolute;
+    top: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: white;
+    transition: transform 0.2s;
+  }
+
+  /* ── Grid ── */
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid-item {
+    aspect-ratio: 1;
+    border-radius: var(--radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: box-shadow 0.15s;
+  }
+  .grid-item:hover { box-shadow: 0 0 0 2px hsl(var(--primary)); }
+
+  /* ── Sidebar / layout ── */
+  .page { display: flex; flex-direction: column; height: 100vh; }
+  .header {
+    border-bottom: 1px solid hsl(var(--border));
+    flex-shrink: 0;
+  }
+  .header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    height: 56px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .content {
+    flex: 1;
+    overflow: auto;
+    padding: 24px;
+  }
+  .content-inner {
+    display: flex;
+    gap: 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .main-col {
+    flex: 1;
+    min-width: 0;
+    max-width: 672px;
+  }
+  .side-col {
+    width: 256px;
+    flex-shrink: 0;
+  }
+
+  /* ── Chain indented ── */
+  .chain-indent {
+    margin-left: 20px;
+    border-left: 2px solid hsl(var(--primary) / 0.3);
+    padding-left: 8px;
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: hsl(var(--background)); }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+  /* ── SVG icons inline ── */
+  svg { display: inline-block; vertical-align: middle; }
+
+  /* ── Annotation callout ── */
+  .callout {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    padding: 14px 24px;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    max-width: 640px;
+    text-align: center;
+    z-index: 100;
+    line-height: 1.8;
+    box-shadow: 0 4px 24px hsl(0 0% 0% / 0.3);
+  }
+  .callout strong { color: hsl(var(--foreground)); }
+  .hl-red { color: hsl(0 63% 55%); font-weight: 500; }
+  .hl-amber { color: hsl(36 90% 55%); font-weight: 500; }
+  .hl-blue { color: hsl(217 91% 65%); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <!-- ═══ Header ═══ -->
+  <div class="header">
+    <div class="header-inner">
+      <h1 style="font-size:18px;font-weight:600;">任务队列</h1>
+      <div class="flex gap-2">
+        <button class="btn btn-destructive-text">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          清空未完成
+        </button>
+        <button class="btn btn-outline">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+          暂停
+        </button>
+        <button class="btn btn-outline">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          刷新
+        </button>
+        <button class="btn btn-primary">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><circle cx="12" cy="12" r="10"/></svg>
+          开始执行
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Content ═══ -->
+  <div class="content">
+    <div class="content-inner">
+      <!-- ── Left column ── -->
+      <div class="main-col" style="display:flex;flex-direction:column;gap:24px;">
+
+        <!-- Queue config card -->
+        <section class="border rounded-lg p-4">
+          <h2 style="font-size:14px;font-weight:600;margin-bottom:12px;">队列配置</h2>
+          <div class="flex" style="flex-wrap:wrap;gap:16px;align-items:flex-end;">
+            <div>
+              <label class="text-xs text-muted" style="display:block;margin-bottom:4px;">启动模式</label>
+              <div class="flex gap-1">
+                <button class="btn btn-outline" style="height:32px;">手动</button>
+                <button class="btn btn-primary" style="height:32px;">自动</button>
+                <button class="btn btn-outline" style="height:32px;">延迟</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-muted">暂停</label>
+              <div class="toggle-track bg-muted">
+                <span class="toggle-knob" style="left:2px;"></span>
+              </div>
+            </div>
+          </div>
+          <div class="flex gap-4 text-xs text-muted" style="margin-top:12px;">
+            <span>等待中: 5</span>
+            <span>执行中: 3</span>
+            <span>失败: 1</span>
+          </div>
+        </section>
+
+        <!-- ── Running (sticky, collapsed) ── -->
+        <div class="sticky bg-background" style="top:0;z-index:10;margin:-24px -24px 0;padding:24px 24px 8px;border-bottom:1px solid hsl(var(--border));">
+          <section>
+            <div class="flex items-center gap-2 mb-3">
+              <svg class="icon-spin" width="16" height="16" fill="none" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke="hsl(217 91% 60%)" stroke-width="3" opacity="0.25"/>
+                <path d="M4 12a8 8 0 018-8" stroke="hsl(217 91% 60%)" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+              <h2 style="font-size:14px;font-weight:600;">执行中 (3)</h2>
+              <button class="btn-ghost" style="margin-left:auto;font-size:12px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;background:none;border:none;color:hsl(var(--muted-foreground));">
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
+                收起
+              </button>
+            </div>
+
+            <div class="space-y-2">
+              <!-- Task card: running #1 (visible) -->
+              <div class="task-card">
+                <div class="thumb" style="background:linear-gradient(135deg, hsl(271 81% 56% / 0.2), hsl(330 81% 56% / 0.15));"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium truncate">换脸 · Kontext Q4 换脸 v2</span>
+                    <span class="badge badge-running">执行中</span>
+                  </div>
+                  <div class="text-xs text-muted" style="margin-top:2px;">photo_038.png · 开始于 14:35:22</div>
+                  <div class="flex items-center gap-2" style="margin-top:6px;">
+                    <div class="progress-track">
+                      <div class="progress-fill" style="width:65%;"></div>
+                    </div>
+                    <span class="text-xs text-muted" style="white-space:nowrap;">13/20</span>
+                  </div>
+                </div>
+                <button class="btn-ghost" style="padding:6px;cursor:pointer;border:none;background:none;color:hsl(var(--muted-foreground));" title="取消">
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </button>
+              </div>
+
+              <!-- Collapsed hint -->
+              <div class="text-xs text-muted text-center py-1">
+                还有 2 个任务执行中
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ── Pending ── -->
+        <section>
+          <div class="flex items-center gap-2 mb-3">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="hsl(var(--muted-foreground))" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><path stroke-linecap="round" d="M12 6v6l4 2"/>
+            </svg>
+            <h2 style="font-size:14px;font-weight:600;">等待中 (5)</h2>
+            <span class="text-xs text-muted" style="margin-left:4px;">拖拽排序</span>
+          </div>
+
+          <div class="space-y-2">
+            <!-- Pending #1 -->
+            <div class="flex items-center gap-1">
+              <button class="btn-ghost" style="padding:4px;cursor:grab;border:none;background:none;color:hsl(var(--muted-foreground));">
+                <svg width="16" height="16" viewBox="0 0 15 15" fill="currentColor"><circle cx="5" cy="3" r="1"/><circle cx="10" cy="3" r="1"/><circle cx="5" cy="7.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="10" cy="12" r="1"/></svg>
+              </button>
+              <div class="task-card flex-1">
+                <div class="thumb" style="background:linear-gradient(135deg, hsl(142 71% 45% / 0.2), hsl(180 60% 50% / 0.15));"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium truncate">放大 · RealESRGAN 4x</span>
+                    <span class="badge badge-pending">等待中</span>
+                  </div>
+                  <div class="text-xs text-muted mt-0.5">IMG_2024_001.jpg · 2024-03-16 14:20</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pending #2 (chain leader) -->
+            <div class="flex items-center gap-1">
+              <button class="btn-ghost" style="padding:4px;cursor:grab;border:none;background:none;color:hsl(var(--muted-foreground));">
+                <svg width="16" height="16" viewBox="0 0 15 15" fill="currentColor"><circle cx="5" cy="3" r="1"/><circle cx="10" cy="3" r="1"/><circle cx="5" cy="7.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="10" cy="12" r="1"/></svg>
+              </button>
+              <div class="task-card flex-1">
+                <div class="thumb" style="background:linear-gradient(135deg, hsl(271 81% 56% / 0.2), hsl(330 81% 56% / 0.15));"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium truncate">换脸 · Kontext Q4 换脸 v2</span>
+                    <span class="badge badge-chain" style="display:inline-flex;align-items:center;gap:2px;">
+                      <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                      1/2
+                    </span>
+                    <span class="badge badge-pending">等待中</span>
+                  </div>
+                  <div class="text-xs text-muted mt-0.5">portrait_005.png · 2024-03-16 14:22</div>
+                  <div class="text-xs text-muted mt-0.5" style="display:flex;align-items:center;gap:4px;">
+                    <span style="color:hsl(var(--foreground));font-weight:500;">1. 换脸</span>
+                    <span style="color:hsl(var(--muted-foreground) / 0.5);">→</span>
+                    <span>2. 放大</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Chain follower (indented) -->
+            <div class="chain-indent">
+              <div class="flex items-center gap-1">
+                <button class="btn-ghost" style="padding:4px;cursor:grab;border:none;background:none;color:hsl(var(--muted-foreground));opacity:0.3;">
+                  <svg width="16" height="16" viewBox="0 0 15 15" fill="currentColor"><circle cx="5" cy="3" r="1"/><circle cx="10" cy="3" r="1"/><circle cx="5" cy="7.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="10" cy="12" r="1"/></svg>
+                </button>
+                <div class="task-card flex-1" style="opacity:0.75;">
+                  <div class="thumb" style="background:linear-gradient(135deg, hsl(142 71% 45% / 0.15), hsl(180 60% 50% / 0.1));"></div>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium truncate">放大 · RealESRGAN 4x</span>
+                      <span class="badge badge-chain" style="display:inline-flex;align-items:center;gap:2px;">
+                        <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                        2/2
+                      </span>
+                      <span class="badge badge-pending">等待中</span>
+                    </div>
+                    <div class="text-xs text-muted mt-0.5">等待上一步结果</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pending #3 -->
+            <div class="flex items-center gap-1">
+              <button class="btn-ghost" style="padding:4px;cursor:grab;border:none;background:none;color:hsl(var(--muted-foreground));">
+                <svg width="16" height="16" viewBox="0 0 15 15" fill="currentColor"><circle cx="5" cy="3" r="1"/><circle cx="10" cy="3" r="1"/><circle cx="5" cy="7.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="10" cy="12" r="1"/></svg>
+              </button>
+              <div class="task-card flex-1">
+                <div class="thumb" style="background:linear-gradient(135deg, hsl(36 90% 50% / 0.2), hsl(10 80% 50% / 0.12));"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium truncate">修复 · Qwen Inpaint v1</span>
+                    <span class="badge badge-pending">等待中</span>
+                  </div>
+                  <div class="text-xs text-muted mt-0.5">portrait_012.jpg · 2024-03-16 14:25</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pending #4 -->
+            <div class="flex items-center gap-1">
+              <button class="btn-ghost" style="padding:4px;cursor:grab;border:none;background:none;color:hsl(var(--muted-foreground));">
+                <svg width="16" height="16" viewBox="0 0 15 15" fill="currentColor"><circle cx="5" cy="3" r="1"/><circle cx="10" cy="3" r="1"/><circle cx="5" cy="7.5" r="1"/><circle cx="10" cy="7.5" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="10" cy="12" r="1"/></svg>
+              </button>
+              <div class="task-card flex-1">
+                <div class="thumb" style="background:linear-gradient(135deg, hsl(142 71% 45% / 0.2), hsl(180 60% 50% / 0.15));"></div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium truncate">放大 · RealESRGAN 4x</span>
+                    <span class="badge badge-pending">等待中</span>
+                  </div>
+                  <div class="text-xs text-muted mt-0.5">scenery_099.jpg · 2024-03-16 14:26</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── Failed ── -->
+        <section>
+          <div class="flex items-center gap-2 mb-3">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="hsl(var(--destructive))" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h2 style="font-size:14px;font-weight:600;">失败 (1)</h2>
+          </div>
+          <div class="space-y-2">
+            <div class="task-card task-card-failed">
+              <div class="thumb" style="background:linear-gradient(135deg, hsl(0 63% 40% / 0.2), hsl(25 80% 50% / 0.1));"></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">放大 · RealESRGAN 4x</span>
+                  <span class="badge badge-failed">失败</span>
+                </div>
+                <div class="text-xs text-muted mt-0.5">large_photo.jpg · 耗时 12秒</div>
+                <p class="text-xs text-destructive" style="margin-top:4px;">CUDA out of memory. Tried to allocate 2.00 GiB</p>
+              </div>
+              <div class="flex gap-1">
+                <button class="btn-ghost" style="padding:6px;cursor:pointer;border:none;background:none;color:hsl(var(--muted-foreground));" title="重试">
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                </button>
+                <button class="btn-ghost" style="padding:6px;cursor:pointer;border:none;background:none;color:hsl(var(--muted-foreground));" title="删除">
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ── Completed ── -->
+        <section>
+          <div class="flex items-center gap-2 mb-3">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="hsl(142 71% 45%)" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h2 style="font-size:14px;font-weight:600;">已完成 (12)</h2>
+          </div>
+          <div class="space-y-2">
+            <div class="task-card" style="opacity:0.8;">
+              <div class="thumb" style="background:linear-gradient(135deg, hsl(142 71% 45% / 0.15), hsl(160 60% 50% / 0.1));"></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">放大 · RealESRGAN 4x</span>
+                  <span class="badge badge-completed">已完成</span>
+                </div>
+                <div class="text-xs text-muted mt-0.5">IMG_2024_089.jpg · 耗时 45秒 · 1 张结果</div>
+              </div>
+              <button class="btn-ghost" style="padding:6px;cursor:pointer;border:none;background:none;color:hsl(var(--muted-foreground));font-size:12px;" title="查看结果">
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+            <div class="task-card" style="opacity:0.8;">
+              <div class="thumb" style="background:linear-gradient(135deg, hsl(271 81% 56% / 0.15), hsl(330 81% 56% / 0.1));"></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">换脸 · Kontext Q4 换脸 v2</span>
+                  <span class="badge badge-completed">已完成</span>
+                </div>
+                <div class="text-xs text-muted mt-0.5">portrait_001.png · 刘亦菲 · 耗时 1分23秒 · 1 张结果</div>
+              </div>
+              <button class="btn-ghost" style="padding:6px;cursor:pointer;border:none;background:none;color:hsl(var(--muted-foreground));font-size:12px;" title="查看结果">
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+            <div class="task-card" style="opacity:0.8;">
+              <div class="thumb" style="background:linear-gradient(135deg, hsl(36 90% 50% / 0.15), hsl(10 80% 50% / 0.08));"></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">修复 · Qwen Inpaint v1</span>
+                  <span class="badge badge-completed">已完成</span>
+                </div>
+                <div class="text-xs text-muted mt-0.5">portrait_003.jpg · 耗时 38秒 · 1 张结果</div>
+              </div>
+              <button class="btn-ghost" style="padding:6px;cursor:pointer;border:none;background:none;color:hsl(var(--muted-foreground));font-size:12px;" title="查看结果">
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ── Right column: recent results ── -->
+      <div class="side-col" style="display:block;">
+        <div class="sticky" style="top:24px;">
+          <div class="flex items-center gap-2 mb-3">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="hsl(142 71% 45%)" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h2 style="font-size:14px;font-weight:600;">最近结果</h2>
+            <span class="text-xs text-muted">(8)</span>
+          </div>
+          <div class="grid-3">
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(271 81% 56% / 0.25), hsl(330 81% 56% / 0.2));"></div>
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(217 91% 60% / 0.25), hsl(180 60% 50% / 0.2));"></div>
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(142 71% 45% / 0.25), hsl(160 70% 50% / 0.2));"></div>
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(36 90% 50% / 0.25), hsl(10 80% 50% / 0.15));"></div>
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(330 81% 56% / 0.25), hsl(350 70% 50% / 0.2));"></div>
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(250 81% 60% / 0.25), hsl(280 70% 50% / 0.2));"></div>
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(180 60% 50% / 0.25), hsl(200 60% 50% / 0.2));"></div>
+            <div class="grid-item" style="background:linear-gradient(135deg, hsl(25 90% 50% / 0.25), hsl(40 80% 50% / 0.2));"></div>
+          </div>
+          <button style="margin-top:8px;width:100%;display:flex;align-items:center;justify-content:center;gap:4px;padding:4px 0;font-size:12px;color:hsl(var(--muted-foreground));background:none;border:none;cursor:pointer;">
+            <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            展开全部 (8)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Annotation callout ═══ -->
+<div class="callout">
+  <strong>任务队列改动说明</strong><br/>
+  1. 顶栏新增 <span class="hl-red">「清空未完成」</span> 按钮 — 一键删除全部等待中 + 失败任务<br/>
+  2. 顶栏新增 <span class="hl-amber">「暂停 / 恢复」</span> 按钮 — 即时生效，无需打开配置<br/>
+  3. 执行中区域超过 2 个任务时可 <span class="hl-blue">收起</span>，只显示第 1 个 + 剩余计数
+</div>
+
+</body>
+</html>

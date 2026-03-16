@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { TaskItem } from '@/api/tasks'
 import { mediaApi, MediaItem } from '@/api/media'
@@ -29,10 +29,33 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: 'text-muted-foreground',
 }
 
-// Param keys that are media IDs
+// Param keys that are media IDs (show thumbnail)
 const MEDIA_ID_KEYS = new Set([
   'source_media_id',
   'face_ref_media_id',
+])
+
+// Human-readable labels for known param keys
+const PARAM_LABELS: Record<string, string> = {
+  source_media_id: '源图片',
+  face_ref_media_id: '人脸参考',
+  target_person_id: '目标人物',
+  result_album_id: '结果图集',
+  upscale_factor: '放大倍数',
+  denoise: '降噪强度',
+  model: '模型',
+  prompt: '提示词',
+  seed: '随机种子',
+  mask_path: '蒙版路径',
+  enable_rear_lora: '启用解剖 LoRA',
+  count: '数量',
+  workflow_name: '工作流名称',
+}
+
+// Param keys to hide from display (internal use only)
+const HIDDEN_PARAMS = new Set([
+  'workflow_name',
+  'workflow_id',
 ])
 
 interface TaskDetailDialogProps {
@@ -79,8 +102,26 @@ export function TaskDetailDialog({ open, onOpenChange, task }: TaskDetailDialogP
   if (!task) return null
 
   const params = task.params || {}
+  const resolved = task.resolved || {}
   const resultIds = task.result_media_ids || []
   const resultOutputs = task.result_outputs || {}
+
+  const workflowLabel = (() => {
+    if (task.workflow_type.startsWith('custom:')) {
+      const category = resolved['workflow_category']
+      const name = resolved['workflow_name']
+      if (category && name) return `${category} · ${name}`
+      if (name) return name
+      return '自定义工作流'
+    }
+    return WORKFLOW_LABELS[task.workflow_type] || task.workflow_type
+  })()
+
+  // Build display params: exclude hidden keys, group media params first
+  const mediaParams = Object.entries(params).filter(([k]) => MEDIA_ID_KEYS.has(k))
+  const otherParams = Object.entries(params).filter(([k]) => !MEDIA_ID_KEYS.has(k) && !HIDDEN_PARAMS.has(k))
+  // Filter out ID-only params that have resolved names (show resolved instead)
+  const ID_ONLY_KEYS = new Set(['target_person_id', 'result_album_id'])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -93,7 +134,7 @@ export function TaskDetailDialog({ open, onOpenChange, task }: TaskDetailDialogP
           {/* Basic info */}
           <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
             <span className="text-muted-foreground">类型</span>
-            <span className="font-medium">{WORKFLOW_LABELS[task.workflow_type] || task.workflow_type}</span>
+            <span className="font-medium">{workflowLabel}</span>
 
             <span className="text-muted-foreground">状态</span>
             <span className={cn('font-medium', STATUS_COLORS[task.status])}>
@@ -135,23 +176,55 @@ export function TaskDetailDialog({ open, onOpenChange, task }: TaskDetailDialogP
             </div>
           )}
 
-          {/* Params */}
-          {Object.keys(params).length > 0 && (
+          {/* Media params (source/reference images) */}
+          {mediaParams.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-muted-foreground mb-2">参数</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground mb-2">输入图片</h3>
               <div className="space-y-2">
-                {Object.entries(params).map(([key, val]) => (
+                {mediaParams.map(([key, val]) => (
                   <div key={key}>
-                    <div className="text-xs text-muted-foreground">{key}</div>
-                    {MEDIA_ID_KEYS.has(key) && typeof val === 'string' && mediaMap[val] ? (
+                    <div className="text-xs text-muted-foreground mb-1">{PARAM_LABELS[key] || key}</div>
+                    {typeof val === 'string' && mediaMap[val] ? (
                       <MediaPreview media={mediaMap[val]} />
                     ) : (
-                      <div className="text-xs font-mono bg-muted px-2 py-1 rounded break-all">
-                        {typeof val === 'object' ? JSON.stringify(val) : String(val)}
+                      <div className="text-xs text-muted-foreground italic">
+                        {resolved[key] || '(未找到)'}
                       </div>
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Other params */}
+          {otherParams.length > 0 && (
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground mb-2">参数</h3>
+              <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+                {otherParams.map(([key, val]) => {
+                  const label = PARAM_LABELS[key] || key
+                  let displayVal: string
+
+                  if (ID_ONLY_KEYS.has(key) && resolved[key]) {
+                    displayVal = resolved[key]
+                  } else if (typeof val === 'boolean') {
+                    displayVal = val ? '是' : '否'
+                  } else if (key === 'seed' && (val === -1 || val === '-1')) {
+                    displayVal = '随机'
+                  } else if (typeof val === 'object') {
+                    displayVal = JSON.stringify(val)
+                  } else {
+                    displayVal = String(val)
+                  }
+
+                  return (
+                    <React.Fragment key={key}>
+                      <span className="text-xs text-muted-foreground">{label}</span>
+                      <span className="text-xs break-all">{displayVal}</span>
+                    </React.Fragment>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -208,7 +281,7 @@ export function TaskDetailDialog({ open, onOpenChange, task }: TaskDetailDialogP
                         <MediaPreview media={m} showPath />
                       </div>
                     ) : (
-                      <div key={id} className="text-xs font-mono bg-muted p-2 rounded truncate">{id}</div>
+                      <div key={id} className="text-xs text-muted-foreground bg-muted p-2 rounded italic">图片已删除</div>
                     )
                   })}
                 </div>
@@ -231,7 +304,7 @@ function MediaPreview({ media, showPath }: { media: MediaItem; showPath?: boolea
         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
       />
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-mono truncate" title={media.file_path}>
+        <div className="text-xs truncate" title={media.file_path}>
           {shortenPath(media.file_path)}
         </div>
         {showPath && (

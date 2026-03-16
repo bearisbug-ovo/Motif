@@ -7,10 +7,12 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { WorkspaceItem } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
+import { confirm } from '@/components/ConfirmDialog'
 import { useGridZoom } from '@/hooks/useGridZoom'
 import { EmptyState } from '@/components/Skeleton'
 import { ContextMenuPortal, MenuItem, MenuSeparator } from '@/components/ContextMenuPortal'
 import { AiMediaSubMenu } from '@/components/AiContextMenu'
+import { WorkflowRunDialog } from '@/components/WorkflowRunDialog'
 import { MoveToAlbumDialog } from '@/components/MoveToAlbumDialog'
 import { MediaDetailDialog } from '@/components/MediaDetailDialog'
 import { LightBox } from '@/components/LightBox'
@@ -19,13 +21,14 @@ import { mediaApi, MediaItem } from '@/api/media'
 import { cn } from '@/lib/utils'
 import { Briefcase } from 'lucide-react'
 
-export function Workspace() {
+export function WorkspaceContent() {
   const { items, loading, fetchItems, removeItem, clear, reorder } = useWorkspaceStore()
   const { containerRef, gridStyle } = useGridZoom({ pageKey: 'workspace' })
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: WorkspaceItem } | null>(null)
   const [moveOpen, setMoveOpen] = useState(false)
   const [moveTarget, setMoveTarget] = useState<string[]>([])
   const [detailItem, setDetailItem] = useState<any>(null)
+  const [aiTarget, setAiTarget] = useState<{ category: string; media: MediaItem } | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -73,20 +76,16 @@ export function Workspace() {
 
   return (
     <div data-testid="workspace-page" className="flex flex-col h-full">
-      <div className="border-b border-border shrink-0">
-        <div className="flex items-center justify-between px-6 h-14 max-w-2xl mx-auto">
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-semibold">工作区</h1>
-            <span className="text-sm text-muted-foreground">{items.length}/100</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleClear} disabled={items.length === 0}>
-            <Trash2 className="w-4 h-4 mr-1" />
-            清空
-          </Button>
-        </div>
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-1 sm:px-6 py-2 shrink-0">
+        <span className="text-sm text-muted-foreground">{items.length}/100</span>
+        <Button variant="outline" size="sm" onClick={handleClear} disabled={items.length === 0}>
+          <Trash2 className="w-4 h-4 mr-1" />
+          清空
+        </Button>
       </div>
 
-      <div ref={containerRef} className="flex-1 overflow-auto px-1 sm:px-6 py-2 sm:py-6 pb-28 md:pb-4">
+      <div ref={containerRef} className="flex-1 overflow-auto px-1 sm:px-6 py-2 sm:py-4 pb-28 md:pb-4">
         {items.length > 0 ? (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={items.map(i => i.id)} strategy={rectSortingStrategy}>
@@ -124,7 +123,7 @@ export function Workspace() {
         const m = ctxMenu.item.media!
         return (
           <ContextMenuPortal position={ctxMenu} onClose={() => setCtxMenu(null)}>
-            <AiMediaSubMenu item={m as any} onAction={(cat) => { setCtxMenu(null) }} />
+            <AiMediaSubMenu item={m as any} onAction={(cat) => { setAiTarget({ category: cat, media: m as any }); setCtxMenu(null) }} />
             <MenuItem icon={<FolderInput className="w-3.5 h-3.5" />} label="移动到图集" onClick={() => { setMoveTarget([m.id]); setMoveOpen(true); setCtxMenu(null) }} />
             <MenuItem icon={<FolderOpen className="w-3.5 h-3.5" />} label="在资源管理器中显示" onClick={() => { mediaApi.showInExplorer(m.id); setCtxMenu(null) }} />
             <div className="px-3 py-1.5 flex items-center gap-1">
@@ -140,7 +139,7 @@ export function Workspace() {
             <MenuItem icon={<X className="w-3.5 h-3.5" />} label="从工作区移除" onClick={async () => { await handleRemove(ctxMenu.item.id); setCtxMenu(null) }} />
             <MenuItem icon={<Trash2 className="w-3.5 h-3.5" />} label="删除" destructive onClick={async () => {
               setCtxMenu(null)
-              if (confirm('确定要删除这张图片吗？')) {
+              if (await confirm({ title: '确定要删除这张图片吗？' })) {
                 await useMediaStore.getState().softDelete(m.id)
                 fetchItems()
               }
@@ -151,6 +150,12 @@ export function Workspace() {
 
       <MoveToAlbumDialog open={moveOpen} onOpenChange={setMoveOpen} mediaIds={moveTarget} />
       <MediaDetailDialog open={!!detailItem} onOpenChange={(o) => { if (!o) setDetailItem(null) }} item={detailItem} />
+      <WorkflowRunDialog
+        open={!!aiTarget}
+        onOpenChange={(v) => { if (!v) setAiTarget(null) }}
+        category={aiTarget?.category || ''}
+        sourceMedia={aiTarget?.media || null}
+      />
       <LightBox />
     </div>
   )

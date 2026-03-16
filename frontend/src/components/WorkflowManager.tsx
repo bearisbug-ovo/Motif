@@ -1,21 +1,27 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { Plus, Star, Trash2, Loader2, Info, Eye, Save } from 'lucide-react'
+import { Plus, Star, Trash2, Loader2, Info, Eye, Save, Pencil, Layers } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ContextMenuPortal, MenuItem, MenuSeparator } from './ContextMenuPortal'
 import { toast } from '@/hooks/use-toast'
+import { confirm } from '@/components/ConfirmDialog'
 import { useWorkflowStore } from '@/stores/workflow'
-import { workflowsApi, Category, WorkflowFull, WorkflowListItem } from '@/api/workflows'
+import { workflowsApi, Category, WorkflowFull, WorkflowListItem, WorkflowManifest } from '@/api/workflows'
 import { cn } from '@/lib/utils'
 import { WorkflowImportDialog } from './WorkflowImportDialog'
+import { CompositeWorkflowDialog } from './CompositeWorkflowDialog'
 
 export function WorkflowManager() {
   const { categories, workflows, loading, fetchCategories, fetchWorkflows, deleteWorkflow, setDefault } = useWorkflowStore()
   const [categoryFilter, setCategoryFilter] = useState<string>('')
   const [showImport, setShowImport] = useState(false)
+  const [editWf, setEditWf] = useState<WorkflowFull | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; wf: WorkflowListItem } | null>(null)
+  const [showComposite, setShowComposite] = useState(false)
+  const [compositeInitWf, setCompositeInitWf] = useState<WorkflowListItem | null>(null)
 
   useEffect(() => {
     fetchCategories()
@@ -28,7 +34,7 @@ export function WorkflowManager() {
   }, [fetchWorkflows])
 
   const handleDelete = useCallback(async (id: string, name: string) => {
-    if (!confirm(`确定要删除工作流「${name}」吗？`)) return
+    if (!await confirm({ title: `确定要删除工作流「${name}」吗？` })) return
     try {
       await deleteWorkflow(id)
       toast({ title: '已删除' })
@@ -46,8 +52,18 @@ export function WorkflowManager() {
     }
   }, [setDefault])
 
+  const handleEdit = useCallback(async (id: string) => {
+    try {
+      const full = await workflowsApi.get(id)
+      setEditWf(full)
+    } catch (e: any) {
+      toast({ title: '加载失败', description: e.message, variant: 'destructive' })
+    }
+  }, [])
+
   const handleImportDone = useCallback(() => {
     setShowImport(false)
+    setEditWf(null)
     fetchWorkflows(categoryFilter || undefined)
   }, [fetchWorkflows, categoryFilter])
 
@@ -79,6 +95,10 @@ export function WorkflowManager() {
           </button>
         ))}
         <div className="flex-1" />
+        <Button size="sm" variant="outline" onClick={() => setShowComposite(true)} className="gap-1.5">
+          <Layers className="w-4 h-4" />
+          创建复合工作流
+        </Button>
         <Button size="sm" onClick={() => setShowImport(true)} className="gap-1.5">
           <Plus className="w-4 h-4" />
           导入工作流
@@ -122,6 +142,11 @@ export function WorkflowManager() {
                   <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-medium">
                     {categoryLabel(wf.category)}
                   </span>
+                  {wf.is_composite && (
+                    <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-500 text-[10px] font-medium">
+                      复合{wf.composite_step_count ? ` · ${wf.composite_step_count}步` : ''}
+                    </span>
+                  )}
                   {wf.description && <span className="truncate">{wf.description}</span>}
                 </div>
               </div>
@@ -147,6 +172,11 @@ export function WorkflowManager() {
             label="查看详情"
             onClick={() => { setDetailId(ctxMenu.wf.id); setCtxMenu(null) }}
           />
+          <MenuItem
+            icon={<Pencil className="w-3.5 h-3.5" />}
+            label="编辑配置"
+            onClick={() => { handleEdit(ctxMenu.wf.id); setCtxMenu(null) }}
+          />
           {!ctxMenu.wf.is_default && (
             <MenuItem
               icon={<Star className="w-3.5 h-3.5" />}
@@ -154,6 +184,11 @@ export function WorkflowManager() {
               onClick={() => { handleSetDefault(ctxMenu.wf.id); setCtxMenu(null) }}
             />
           )}
+          <MenuItem
+            icon={<Layers className="w-3.5 h-3.5" />}
+            label="以此创建复合工作流"
+            onClick={() => { setCompositeInitWf(ctxMenu.wf); setShowComposite(true); setCtxMenu(null) }}
+          />
           <MenuSeparator />
           <MenuItem
             icon={<Trash2 className="w-3.5 h-3.5" />}
@@ -172,19 +207,36 @@ export function WorkflowManager() {
         />
       )}
 
+      {editWf && (
+        <WorkflowImportDialog
+          onClose={() => setEditWf(null)}
+          onDone={handleImportDone}
+          editWorkflow={editWf}
+        />
+      )}
+
       <WorkflowDetailDialog
         workflowId={detailId}
         categories={categories}
         onClose={() => setDetailId(null)}
+        onEdit={(wf) => { setDetailId(null); setEditWf(wf) }}
+      />
+
+      <CompositeWorkflowDialog
+        open={showComposite}
+        onOpenChange={(v) => { setShowComposite(v); if (!v) setCompositeInitWf(null) }}
+        onDone={() => fetchWorkflows(categoryFilter || undefined)}
+        initialWorkflow={compositeInitWf}
       />
     </div>
   )
 }
 
-function WorkflowDetailDialog({ workflowId, categories, onClose }: {
+function WorkflowDetailDialog({ workflowId, categories, onClose, onEdit }: {
   workflowId: string | null
   categories: Category[]
   onClose: () => void
+  onEdit?: (wf: WorkflowFull) => void
 }) {
   const { fetchWorkflows } = useWorkflowStore()
   const [wf, setWf] = useState<WorkflowFull | null>(null)
@@ -297,12 +349,20 @@ function WorkflowDetailDialog({ workflowId, categories, onClose }: {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {wf?.name || '工作流详情'}
-            {hasEdits && (
-              <Button size="sm" className="h-7 gap-1 ml-auto" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                保存
-              </Button>
-            )}
+            <div className="flex items-center gap-1.5 ml-auto">
+              {wf && onEdit && (
+                <Button variant="outline" size="sm" className="h-7 gap-1" onClick={() => { onEdit(wf); onClose() }}>
+                  <Pencil className="w-3.5 h-3.5" />
+                  编辑配置
+                </Button>
+              )}
+              {hasEdits && (
+                <Button size="sm" className="h-7 gap-1" onClick={handleSave} disabled={saving}>
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  保存
+                </Button>
+              )}
+            </div>
           </DialogTitle>
         </DialogHeader>
 
@@ -413,7 +473,18 @@ function WorkflowDetailDialog({ workflowId, categories, onClose }: {
                           <code className="text-[10px] text-muted-foreground/60 font-mono">#{ep.node_id}.{ep.key}</code>
                         </div>
                         <div className="flex-1 min-w-0">
-                          {ep.type === 'string' ? (
+                          {ep.choices && ep.choices.length > 0 ? (
+                            <Select value={displayVal ?? ''} onValueChange={v => setEdits(prev => ({ ...prev, [editKey]: v }))}>
+                              <SelectTrigger className="h-7 text-xs font-mono">
+                                <SelectValue placeholder="选择..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ep.choices.map((c: string) => (
+                                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : ep.type === 'string' ? (
                             <textarea
                               className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none font-mono"
                               rows={2}

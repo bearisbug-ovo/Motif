@@ -21,6 +21,7 @@ class Settings:
         self.recycle_bin_days: int = data.get("recycle_bin_days", 30)
         self.task_timeout_minutes: int = data.get("task_timeout_minutes", 10)
         self.fastapi_port: int = data.get("fastapi_port", 8000)
+        self.platform_cookies: dict = data.get("platform_cookies", {})
 
     # ── Sub-path helpers ──────────────────────────────────────────────────
 
@@ -41,6 +42,22 @@ class Settings:
     def masks_dir(self) -> Path:
         return self.appdata_dir / "cache" / "masks"
 
+    def crops_cache_dir(self) -> Path:
+        return self.appdata_dir / "cache" / "crops"
+
+    def ffmpeg_path(self) -> str:
+        """Return ffmpeg binary path, checking imageio_ffmpeg first, then system PATH."""
+        try:
+            import imageio_ffmpeg
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            pass
+        # Fallback: known path in ComfyUI environment
+        known = Path("D:/ai/ComfyUI-aki-v1.6/python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe")
+        if known.exists():
+            return str(known)
+        return "ffmpeg"
+
     def poses_dir(self) -> Path:
         return self.appdata_dir / "poses"
 
@@ -60,6 +77,7 @@ class Settings:
             "recycle_bin_days": self.recycle_bin_days,
             "task_timeout_minutes": self.task_timeout_minutes,
             "fastapi_port": self.fastapi_port,
+            "platform_cookies": self.platform_cookies,
         }
 
 
@@ -78,11 +96,15 @@ def _ensure_dirs(settings: Settings) -> None:
         settings.generated_dir("face_swap"),
         settings.generated_dir("portrait"),
         settings.generated_dir("screenshot"),
+        settings.generated_dir("crop"),
+        settings.generated_dir("trim"),
         settings.imports_dir("clipboard"),
         settings.masks_dir(),
+        settings.crops_cache_dir(),
         settings.poses_dir(),
         settings.workflows_dir(),
         settings.downloads_dir("xiaohongshu"),
+        settings.downloads_dir("douyin"),
     ]:
         d.mkdir(parents=True, exist_ok=True)
 

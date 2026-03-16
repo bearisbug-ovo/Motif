@@ -1,20 +1,22 @@
 import { create } from 'zustand'
 import { personsApi, Person, PersonSortField } from '@/api/persons'
-import { getSortDefault, getFilterDefault } from '@/lib/filterDefaults'
+import { getSortDefault, getFilterDefault, parseSortValue } from '@/lib/filterDefaults'
 
 interface PersonStore {
   persons: Person[]
   currentPerson: Person | null
   loading: boolean
-  sort: PersonSortField
+  sort: string
   filterRating: string | undefined
+  filterTagIds: string[]
   fetchPersons: () => Promise<void>
   fetchPerson: (id: string) => Promise<void>
   createPerson: (name: string) => Promise<Person>
-  updatePerson: (id: string, data: { name?: string; cover_media_id?: string }) => Promise<void>
+  updatePerson: (id: string, data: { name?: string; cover_media_id?: string; tag_ids?: string[] }) => Promise<void>
   deletePerson: (id: string, mode?: 'person_only' | 'person_and_albums' | 'all') => Promise<void>
-  setSort: (sort: PersonSortField) => void
+  setSort: (sort: string) => void
   setFilterRating: (f: string | undefined) => void
+  setFilterTagIds: (ids: string[]) => void
   resetFilters: () => void
 }
 
@@ -22,14 +24,17 @@ export const usePersonStore = create<PersonStore>((set, get) => ({
   persons: [],
   currentPerson: null,
   loading: false,
-  sort: 'created_at',
+  sort: 'created_at:desc',
   filterRating: undefined,
+  filterTagIds: [],
 
   fetchPersons: async () => {
     set({ loading: true })
     try {
-      const { sort, filterRating } = get()
-      const persons = await personsApi.list(sort, filterRating)
+      const { sort, filterRating, filterTagIds } = get()
+      const { field, dir } = parseSortValue(sort)
+      const tagIds = filterTagIds.length > 0 ? filterTagIds.join(',') : undefined
+      const persons = await personsApi.list(field as PersonSortField, filterRating, dir, tagIds)
       set({ persons, loading: false })
     } catch {
       set({ loading: false })
@@ -65,8 +70,10 @@ export const usePersonStore = create<PersonStore>((set, get) => ({
 
   setSort: (sort) => set({ sort }),
   setFilterRating: (filterRating) => set({ filterRating }),
+  setFilterTagIds: (filterTagIds) => set({ filterTagIds }),
   resetFilters: () => set({
-    sort: getSortDefault('media-library') as PersonSortField,
+    sort: getSortDefault('media-library'),
     filterRating: getFilterDefault('filterRating') || undefined,
+    filterTagIds: [],
   }),
 }))

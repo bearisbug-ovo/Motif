@@ -1,0 +1,375 @@
+{
+  "306": {
+    "inputs": {
+      "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+      "type": "flux2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "307": {
+    "inputs": {
+      "unet_name": "flux-2-klein\\F2K-9b-darkBeast_dbkBlitzV15_fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "308": {
+    "inputs": {
+      "seed": [
+        "315",
+        0
+      ],
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "388",
+        0
+      ],
+      "positive": [
+        "324",
+        0
+      ],
+      "negative": [
+        "323",
+        0
+      ],
+      "latent_image": [
+        "327",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "@denoise K采样器"
+    }
+  },
+  "309": {
+    "inputs": {
+      "vae_name": "flux2-vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "311": {
+    "inputs": {
+      "value": 1024
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "INT Constant"
+    }
+  },
+  "312": {
+    "inputs": {
+      "mask_opacity": 0.5,
+      "mask_color": "255, 0, 0",
+      "pass_through": false,
+      "image": [
+        "316",
+        1
+      ],
+      "mask": [
+        "316",
+        2
+      ]
+    },
+    "class_type": "ImageAndMaskPreview",
+    "_meta": {
+      "title": "@ImageAndMaskPreview"
+    }
+  },
+  "313": {
+    "inputs": {
+      "image": "clipspace/clipspace-painted-masked-1772549489569.png [input]"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "@加载图像"
+    }
+  },
+  "314": {
+    "inputs": {
+      "text": "沿边缘去除镂空绿色区域部分的衣服，区域边缘外衣服保留，镂空展示该区域内部的身体",
+      "clip": [
+        "306",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "@prompt CLIP文本编码"
+    }
+  },
+  "315": {
+    "inputs": {
+      "seed": 612537955548459
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "316": {
+    "inputs": {
+      "downscale_algorithm": "bilinear",
+      "upscale_algorithm": "bicubic",
+      "preresize": false,
+      "preresize_mode": "ensure minimum resolution",
+      "preresize_min_width": 1024,
+      "preresize_min_height": 1024,
+      "preresize_max_width": 16384,
+      "preresize_max_height": 16384,
+      "mask_fill_holes": true,
+      "mask_expand_pixels": 100,
+      "mask_invert": false,
+      "mask_blend_pixels": 64,
+      "mask_hipass_filter": 0.1,
+      "extend_for_outpainting": false,
+      "extend_up_factor": 1,
+      "extend_down_factor": 1,
+      "extend_left_factor": 1,
+      "extend_right_factor": 1,
+      "context_from_mask_extend_factor": 2,
+      "output_resize_to_target_size": true,
+      "output_target_width": [
+        "311",
+        0
+      ],
+      "output_target_height": [
+        "311",
+        0
+      ],
+      "output_padding": "32",
+      "device_mode": "gpu (much faster)",
+      "image": [
+        "332",
+        0
+      ],
+      "mask": [
+        "313",
+        1
+      ]
+    },
+    "class_type": "InpaintCropImproved",
+    "_meta": {
+      "title": "✂️ Inpaint Crop"
+    }
+  },
+  "318": {
+    "inputs": {
+      "filename_prefix": "20260307184839",
+      "images": [
+        "320",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "320": {
+    "inputs": {
+      "stitcher": [
+        "316",
+        0
+      ],
+      "inpainted_image": [
+        "328",
+        0
+      ]
+    },
+    "class_type": "InpaintStitchImproved",
+    "_meta": {
+      "title": "✂️ Inpaint Stitch"
+    }
+  },
+  "321": {
+    "inputs": {
+      "conditioning": [
+        "314",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "323": {
+    "inputs": {
+      "conditioning": [
+        "321",
+        0
+      ],
+      "latent": [
+        "325",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "324": {
+    "inputs": {
+      "conditioning": [
+        "314",
+        0
+      ],
+      "latent": [
+        "325",
+        0
+      ]
+    },
+    "class_type": "ReferenceLatent",
+    "_meta": {
+      "title": "参考Latent"
+    }
+  },
+  "325": {
+    "inputs": {
+      "pixels": [
+        "316",
+        1
+      ],
+      "vae": [
+        "309",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "326": {
+    "inputs": {
+      "purge_cache": true,
+      "purge_models": true,
+      "anything": [
+        "308",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: PurgeVRAM V2",
+    "_meta": {
+      "title": "图层工具：清除VRAM V2"
+    }
+  },
+  "327": {
+    "inputs": {
+      "width": [
+        "311",
+        0
+      ],
+      "height": [
+        "311",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyFlux2LatentImage",
+    "_meta": {
+      "title": "空Latent图像（Flux2）"
+    }
+  },
+  "328": {
+    "inputs": {
+      "samples": [
+        "326",
+        0
+      ],
+      "vae": [
+        "309",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "332": {
+    "inputs": {
+      "color": "0, 255, 0",
+      "device": "cpu",
+      "image": [
+        "313",
+        0
+      ],
+      "mask": [
+        "313",
+        1
+      ]
+    },
+    "class_type": "DrawMaskOnImage",
+    "_meta": {
+      "title": "Draw Mask On Image"
+    }
+  },
+  "379": {
+    "inputs": {
+      "lora_name": "flux-2-kelin\\Klein_9B-后位.safetensors",
+      "strength_model": 1,
+      "model": [
+        "307",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "382": {
+    "inputs": {
+      "compare_view": {
+        "before": "/api/view?filename=comfy.compare.a_temp_jfltq_00001_.png&subfolder=&type=temp&rand=0.19766975643045992",
+        "after": "/api/view?filename=comfy.compare.b_temp_jfltq_00001_.png&subfolder=&type=temp&rand=0.19766975643045992"
+      },
+      "image_a": [
+        "320",
+        0
+      ],
+      "image_b": [
+        "313",
+        0
+      ]
+    },
+    "class_type": "ImageCompare",
+    "_meta": {
+      "title": "图像对比"
+    }
+  },
+  "388": {
+    "inputs": {
+      "boolean": true,
+      "on_true": [
+        "379",
+        0
+      ],
+      "on_false": [
+        "307",
+        0
+      ]
+    },
+    "class_type": "Switch any [Crystools]",
+    "_meta": {
+      "title": "@backlora🪛 Switch any"
+    }
+  }
+}

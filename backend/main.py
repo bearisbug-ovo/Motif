@@ -33,7 +33,7 @@ from config import get_settings
 from database import Base, engine
 import models  # noqa: F401 — register all ORM models
 
-from routers import system, persons, albums, media, recycle_bin, tasks, workspace, downloads, workflows
+from routers import system, persons, albums, media, recycle_bin, tasks, workspace, downloads, workflows, launcher, tags
 
 # Ensure tables exist (Alembic handles migrations; this is a safety net)
 Base.metadata.create_all(bind=engine)
@@ -59,6 +59,27 @@ app.include_router(workspace.router,  prefix="/api/workspace",   tags=["workspac
 app.include_router(downloads.router,  prefix="/api/download",    tags=["download"])
 app.include_router(workflows.router,  prefix="/api/workflows",   tags=["workflows"])
 app.include_router(workflows.categories_router, prefix="/api/workflow-categories", tags=["workflow-categories"])
+app.include_router(launcher.router,  prefix="/api/launcher",    tags=["launcher"])
+app.include_router(tags.router,      prefix="/api/tags",        tags=["tags"])
+
+
+# ── Middleware: track clients & errors for launcher dashboard ─────────────
+@app.middleware("http")
+async def launcher_tracking_middleware(request: Request, call_next):
+    from routers.launcher import track_client, track_error
+
+    # Track client connection (skip internal/health checks)
+    path = request.url.path
+    if path.startswith("/api/") and not path.startswith("/api/launcher/"):
+        track_client(request)
+
+    response = await call_next(request)
+
+    # Track errors
+    if response.status_code >= 400 and path.startswith("/api/"):
+        track_error(response.status_code, request.method, path)
+
+    return response
 
 
 # ── Utility endpoints ─────────────────────────────────────────────────────────
@@ -68,10 +89,24 @@ def health():
     return {"status": "ok", "version": "2.0.0"}
 
 
+def _ensure_dpi_aware():
+    """Enable per-monitor DPI awareness so tkinter dialogs render crisp on HiDPI."""
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-monitor DPI aware
+    except Exception:
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 @app.get("/api/files/pick-folder")
 def pick_folder():
     """Open a native Windows folder-picker dialog and return the chosen path."""
     try:
+        _ensure_dpi_aware()
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
@@ -88,6 +123,7 @@ def pick_folder():
 def pick_files():
     """Open a native Windows file-picker dialog and return the chosen file paths."""
     try:
+        _ensure_dpi_aware()
         import tkinter as tk
         from tkinter import filedialog
         root = tk.Tk()
@@ -225,11 +261,17 @@ def serve_native_file(path: str, request: Request):
 
     range_header = request.headers.get("range")
     if range_header and range_header.startswith("bytes="):
-        # Parse Range header: "bytes=start-end" or "bytes=start-"
+        # Parse Range header: "bytes=start-end", "bytes=start-", or "bytes=-N" (suffix)
         range_spec = range_header[6:]
         parts = range_spec.split("-", 1)
-        start = int(parts[0]) if parts[0] else 0
-        end = int(parts[1]) if parts[1] else file_size - 1
+        if not parts[0]:
+            # Suffix range: "bytes=-N" means last N bytes
+            suffix_len = int(parts[1])
+            start = max(0, file_size - suffix_len)
+            end = file_size - 1
+        else:
+            start = int(parts[0])
+            end = int(parts[1]) if parts[1] else file_size - 1
         end = min(end, file_size - 1)
         content_length = end - start + 1
 
@@ -320,6 +362,9 @@ async def _recycle_bin_cleanup_loop():
 
 @app.on_event("startup")
 async def startup():
+    import logging
+    _logger = logging.getLogger("motif")
+
     # Seed default workflows on first run
     from database import SessionLocal
     from comfyui.seed_workflows import seed_default_workflows
@@ -327,8 +372,26 @@ async def startup():
     try:
         seed_default_workflows(db)
     except Exception as e:
-        import logging
-        logging.getLogger("motif").error(f"Failed to seed workflows: {e}")
+        _logger.error(f"Failed to seed workflows: {e}")
+    finally:
+        db.close()
+
+    # Recover stale "running" tasks from a previous crash/restart
+    from sqlalchemy import select
+    from models.task import Task
+    from datetime import datetime
+    db = SessionLocal()
+    try:
+        stale = db.execute(
+            select(Task).where(Task.status == "running")
+        ).scalars().all()
+        for t in stale:
+            t.status = "failed"
+            t.error_message = "服务重启时任务仍在执行，已标记为失败（可重试）"
+            t.finished_at = datetime.utcnow()
+            _logger.warning(f"Recovered stale running task {t.id} → failed")
+        if stale:
+            db.commit()
     finally:
         db.close()
 

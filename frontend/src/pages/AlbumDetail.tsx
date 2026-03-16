@@ -1,28 +1,33 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Download, LayoutGrid, Rows3, Edit2, Trash2, FolderInput, FolderOpen, Shuffle, Briefcase, ImageIcon, Star, ArrowRightLeft, Info } from 'lucide-react'
+import { ArrowLeft, Download, LayoutGrid, Rows3, Edit2, Trash2, FolderInput, FolderOpen, Shuffle, Briefcase, ImageIcon, Star, ArrowRightLeft, Info, CheckSquare, FileSearch } from 'lucide-react'
 import { useAlbumStore } from '@/stores/album'
+import { Album, albumsApi } from '@/api/albums'
 import { usePersonStore } from '@/stores/person'
 import { useMediaStore, setOnRatingChange, setOnDelete } from '@/stores/media'
+import { useLightboxStore } from '@/stores/lightbox'
 import { MediaCard } from '@/components/MediaCard'
 import { FilterBar } from '@/components/FilterBar'
 import { LightBox } from '@/components/LightBox'
 import { ImportDialog } from '@/components/ImportDialog'
 import { MoveToAlbumDialog } from '@/components/MoveToAlbumDialog'
+import { MoveToPersonDialog } from '@/components/MoveToPersonDialog'
 import { SelectionToolbar } from '@/components/SelectionToolbar'
-import { BatchFaceSwapDialog } from '@/components/BatchFaceSwapDialog'
+import { BatchAiDialog } from '@/components/BatchAiDialog'
 import { WorkflowRunDialog } from '@/components/WorkflowRunDialog'
 import { StarRating } from '@/components/StarRating'
 import { ContextMenuPortal, MenuItem, MenuSeparator } from '@/components/ContextMenuPortal'
 import { MediaDetailDialog } from '@/components/MediaDetailDialog'
-import { AiAlbumSubMenu, AiMediaSubMenu } from '@/components/AiContextMenu'
+import { AiBatchSubMenu, AiMediaSubMenu } from '@/components/AiContextMenu'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { personsApi, Person as PersonItem } from '@/api/persons'
 import { mediaApi, MediaItem } from '@/api/media'
+import { systemApi } from '@/api/system'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { toast } from '@/hooks/use-toast'
+import { confirm } from '@/components/ConfirmDialog'
 import { cn } from '@/lib/utils'
 import { useGridZoom } from '@/hooks/useGridZoom'
 import { useMissingFiles } from '@/hooks/useMissingFiles'
@@ -30,9 +35,12 @@ import { useDevice } from '@/hooks/useDevice'
 import { EmptyState } from '@/components/Skeleton'
 
 const SORT_OPTIONS = [
-  { value: 'sort_order', label: '默认顺序' },
-  { value: 'created_at', label: '最新添加' },
-  { value: 'rating', label: '评分最高' },
+  { value: 'sort_order:asc',  label: '默认顺序' },
+  { value: 'sort_order:desc', label: '默认倒序' },
+  { value: 'created_at:desc', label: '最新添加' },
+  { value: 'created_at:asc',  label: '最早添加' },
+  { value: 'rating:desc',     label: '评分最高' },
+  { value: 'rating:asc',      label: '评分最低' },
 ]
 
 type LayoutMode = 'grid' | 'row'
@@ -139,13 +147,21 @@ export function AlbumDetail() {
   const [renameName, setRenameName] = useState('')
   const [moveTarget, setMoveTarget] = useState<string[]>([])
   const [moveOpen, setMoveOpen] = useState(false)
+  const [moveToPersonTarget, setMoveToPersonTarget] = useState<string[]>([])
+  const [moveToPersonOpen, setMoveToPersonOpen] = useState(false)
   const [aiTarget, setAiTarget] = useState<{ category: string; media: MediaItem } | null>(null)
-  const [batchFaceSwapOpen, setBatchFaceSwapOpen] = useState(false)
+  const [batchAiCategory, setBatchAiCategory] = useState<string | null>(null)
+  const [batchAiMediaIds, setBatchAiMediaIds] = useState<string[] | undefined>()
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; item: MediaItem } | null>(null)
   const [detailItem, setDetailItem] = useState<MediaItem | null>(null)
   const [moveAlbumOpen, setMoveAlbumOpen] = useState(false)
   const [moveAlbumPersons, setMoveAlbumPersons] = useState<PersonItem[]>([])
   const [moveAlbumLoading, setMoveAlbumLoading] = useState(false)
+  const [deleteAlbumOpen, setDeleteAlbumOpen] = useState(false)
+  const [deleteMode, setDeleteMode] = useState<'album_only' | 'album_and_media' | 'move_to_album'>('album_only')
+  const [deleteTargetAlbumId, setDeleteTargetAlbumId] = useState('')
+  const [deleteSiblingAlbums, setDeleteSiblingAlbums] = useState<Album[]>([])
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   const { isMobile } = useDevice()
   const effectiveLayout = isMobile ? 'grid' : layout
@@ -206,7 +222,7 @@ export function AlbumDetail() {
     const shuffled = shuffleArray(items)
     const onReshuffle = () => {
       const re = shuffleArray(items)
-      useMediaStore.setState({ lightboxItems: re, lightboxIndex: 0 })
+      useLightboxStore.setState({ localItems: re, localIndex: 0, currentItem: re[0] || null, chainTree: null, chainFlat: [], chainIndex: -1 })
     }
     openLightbox(shuffled, 0, {
       albumId,
@@ -225,8 +241,16 @@ export function AlbumDetail() {
       useMediaStore.setState({ items: [], loading: true })
     }
     resetFilters('album-detail')
-    fetchAlbum(albumId)
-    fetchByAlbum(albumId)
+    fetchAlbum(albumId).then(() => {
+      const album = useAlbumStore.getState().currentAlbum
+      if (album?.is_generated_album) {
+        // Generated albums contain only AI outputs — clear sourceType filter
+        setSourceType(undefined)
+        fetchByAlbum(albumId, { sourceType: undefined })
+      } else {
+        fetchByAlbum(albumId)
+      }
+    })
   }, [albumId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -304,13 +328,13 @@ export function AlbumDetail() {
         <FilterBar
           sortField={sort}
           sortOptions={SORT_OPTIONS}
-          onSortChange={(v) => { setSort(v as any); if (albumId) fetchByAlbum(albumId) }}
+          onSortChange={(v) => { setSort(v as any); if (albumId) fetchByAlbum(albumId, { sort: v }) }}
           ratingFilter={filterRating}
-          onRatingFilterChange={(v) => { setFilterRating(v || undefined); if (albumId) fetchByAlbum(albumId) }}
+          onRatingFilterChange={(v) => { const val = v || undefined; setFilterRating(val); if (albumId) fetchByAlbum(albumId, { filterRating: val }) }}
           sourceType={sourceType}
-          onSourceTypeChange={(v) => { setSourceType(v || undefined); if (albumId) fetchByAlbum(albumId) }}
+          onSourceTypeChange={(v) => { const val = v || undefined; setSourceType(val); if (albumId) fetchByAlbum(albumId, { sourceType: val }) }}
           mediaType={mediaType}
-          onMediaTypeChange={(v) => { setMediaType(v || undefined); if (albumId) fetchByAlbum(albumId) }}
+          onMediaTypeChange={(v) => { const val = v || undefined; setMediaType(val); if (albumId) fetchByAlbum(albumId, { mediaType: val }) }}
         />
       </div>
 
@@ -398,14 +422,19 @@ export function AlbumDetail() {
           }} />
           <MenuItem icon={<Download className="w-3.5 h-3.5" />} label="导入" onClick={() => { setAreaMenu(null); setImportOpen(true) }} />
           <MenuItem icon={<ArrowRightLeft className="w-3.5 h-3.5" />} label="移动到其他人物" onClick={() => { setAreaMenu(null); handleOpenMoveAlbum() }} />
-          <AiAlbumSubMenu onBatchFaceSwap={() => { setAreaMenu(null); setBatchFaceSwapOpen(true) }} />
+          <AiBatchSubMenu onBatchAi={(cat) => { setAreaMenu(null); setBatchAiMediaIds(undefined); setBatchAiCategory(cat) }} />
           <MenuSeparator />
           <MenuItem icon={<Trash2 className="w-3.5 h-3.5" />} label="删除图集" onClick={async () => {
             setAreaMenu(null)
-            if (albumId && confirm('确定要删除此图集吗？')) {
-              await deleteAlbum(albumId)
-              navigate(-1)
-            }
+            setDeleteMode('album_only')
+            setDeleteTargetAlbumId('')
+            setDeleteAlbumOpen(true)
+            if (currentAlbum?.person_id) {
+              try {
+                const list = await albumsApi.listByPerson(currentAlbum.person_id)
+                setDeleteSiblingAlbums(list.filter(a => a.id !== albumId))
+              } catch { setDeleteSiblingAlbums([]) }
+            } else { setDeleteSiblingAlbums([]) }
           }} destructive />
         </ContextMenuPortal>
       )}
@@ -461,18 +490,43 @@ export function AlbumDetail() {
               </button>
             ))}
           </div>
+          {missingFiles.has(rowMenu.item.id) && (
+            <MenuItem icon={<FileSearch className="w-3.5 h-3.5" />} label="重新定位文件" onClick={async () => {
+              const mid = rowMenu.item.id; setRowMenu(null)
+              try {
+                const { paths } = await systemApi.pickFiles()
+                if (paths.length === 0) return
+                const updated = await mediaApi.relocate(mid, paths[0])
+                useMediaStore.getState().replaceItem(updated)
+                toast({ title: '文件已重新定位' })
+              } catch (err: any) { toast({ title: '重新定位失败', description: err.message, variant: 'destructive' }) }
+            }} />
+          )}
+          {!multiSelectMode && (
+            <MenuItem icon={<CheckSquare className="w-3.5 h-3.5" />} label="开启多选" onClick={() => {
+              setRowMenu(null)
+              setMultiSelectMode(true)
+              toggleSelection(rowMenu.item.id)
+            }} />
+          )}
           <MenuSeparator />
           <MenuItem icon={<Info className="w-3.5 h-3.5" />} label="查看详情" onClick={() => { setDetailItem(rowMenu.item); setRowMenu(null) }} />
           <MenuItem icon={<Trash2 className="w-3.5 h-3.5" />} label="删除" onClick={async () => {
             setRowMenu(null)
-            if (confirm('确定要删除这张图片吗？')) {
+            if (await confirm({ title: '确定要删除这张图片吗？' })) {
               await useMediaStore.getState().softDelete(rowMenu.item.id)
             }
           }} destructive />
         </ContextMenuPortal>
       )}
 
-      <MediaDetailDialog open={!!detailItem} onOpenChange={(o) => { if (!o) setDetailItem(null) }} item={detailItem} />
+      <MediaDetailDialog
+        open={!!detailItem}
+        onOpenChange={(o) => { if (!o) setDetailItem(null) }}
+        item={detailItem}
+        isMissing={detailItem ? missingFiles.has(detailItem.id) : undefined}
+        onRelocated={(updated) => useMediaStore.getState().replaceItem(updated)}
+      />
 
       {/* Rename album dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
@@ -536,6 +590,13 @@ export function AlbumDetail() {
         personId={currentAlbum?.person_id || undefined}
         onComplete={handleRefresh}
       />
+      <MoveToPersonDialog
+        open={moveToPersonOpen}
+        onOpenChange={setMoveToPersonOpen}
+        mediaIds={moveToPersonTarget}
+        currentPersonId={currentAlbum?.person_id || undefined}
+        onComplete={handleRefresh}
+      />
       <ImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
@@ -545,7 +606,10 @@ export function AlbumDetail() {
       />
       <SelectionToolbar
         personId={currentAlbum?.person_id || undefined}
+        scope="album"
         onMoveToAlbum={(ids) => { setMoveTarget(ids); setMoveOpen(true) }}
+        onMoveToPerson={(ids) => { setMoveToPersonTarget(ids); setMoveToPersonOpen(true) }}
+        onBatchAi={(ids) => { setBatchAiMediaIds(ids); setBatchAiCategory('') }}
         onRefresh={handleRefresh}
       />
       <WorkflowRunDialog
@@ -554,15 +618,71 @@ export function AlbumDetail() {
         category={aiTarget?.category || ''}
         sourceMedia={aiTarget?.media || null}
       />
-      <BatchFaceSwapDialog
-        open={batchFaceSwapOpen}
-        onOpenChange={setBatchFaceSwapOpen}
-        albumId={albumId || ''}
-        albumName={currentAlbum?.name || ''}
+      <BatchAiDialog
+        open={batchAiCategory !== null}
+        onOpenChange={(v) => { if (!v) { setBatchAiCategory(null); setBatchAiMediaIds(undefined) } }}
+        mediaIds={batchAiMediaIds}
+        albumId={batchAiMediaIds ? undefined : (albumId || undefined)}
+        albumName={currentAlbum?.name}
         personId={currentAlbum?.person_id || undefined}
-        imageCount={items.filter(m => m.media_type === 'image').length}
+        defaultCategory={batchAiCategory || undefined}
+        imageCount={batchAiMediaIds?.length ?? items.filter(m => m.media_type === 'image').length}
         onComplete={handleRefresh}
       />
+      <Dialog open={deleteAlbumOpen} onOpenChange={setDeleteAlbumOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>删除图集「{currentAlbum?.name}」</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">图集将被删除，请选择如何处理其中的 {items.length} 个媒体：</p>
+            <div className="space-y-2">
+              <label className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${deleteMode === 'album_only' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}>
+                <input type="radio" name="delMode" className="mt-0.5 accent-primary" checked={deleteMode === 'album_only'} onChange={() => setDeleteMode('album_only')} />
+                <div>
+                  <div className="text-sm font-medium">转为未分类</div>
+                  <div className="text-xs text-muted-foreground">媒体保留在人物下，不再归属任何图集</div>
+                </div>
+              </label>
+              {deleteSiblingAlbums.length > 0 && (
+                <label className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${deleteMode === 'move_to_album' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}>
+                  <input type="radio" name="delMode" className="mt-0.5 accent-primary" checked={deleteMode === 'move_to_album'} onChange={() => setDeleteMode('move_to_album')} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">移到其他图集</div>
+                    {deleteMode === 'move_to_album' && (
+                      <select className="mt-1.5 w-full h-8 rounded-md border border-input bg-background px-2 text-sm"
+                        value={deleteTargetAlbumId} onChange={(e) => setDeleteTargetAlbumId(e.target.value)}>
+                        <option value="">选择目标图集...</option>
+                        {deleteSiblingAlbums.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                </label>
+              )}
+              <label className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors ${deleteMode === 'album_and_media' ? 'border-destructive bg-destructive/5' : 'border-border hover:bg-muted/50'}`}>
+                <input type="radio" name="delMode" className="mt-0.5 accent-primary" checked={deleteMode === 'album_and_media'} onChange={() => setDeleteMode('album_and_media')} />
+                <div>
+                  <div className="text-sm font-medium text-destructive">连同媒体一起删除</div>
+                  <div className="text-xs text-muted-foreground">媒体将移入回收站</div>
+                </div>
+              </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteAlbumOpen(false)}>取消</Button>
+            <Button variant="destructive" disabled={deleteLoading || (deleteMode === 'move_to_album' && !deleteTargetAlbumId)} onClick={async () => {
+              if (!albumId) return
+              setDeleteLoading(true)
+              try {
+                await deleteAlbum(albumId, deleteMode, deleteMode === 'move_to_album' ? deleteTargetAlbumId : undefined)
+                setDeleteAlbumOpen(false)
+                navigate(-1)
+              } catch {}
+              setDeleteLoading(false)
+            }}>
+              {deleteLoading ? '删除中...' : '确认删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -26,6 +26,14 @@ class Task(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Batch fields — tasks created together in one batch call
+    batch_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
+    # Chain fields — tasks linked as A→B execute atomically
+    chain_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    chain_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chain_source_param: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
 
 class QueueConfig(Base):
     __tablename__ = "queue_config"

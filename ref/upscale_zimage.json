@@ -1,0 +1,291 @@
+{
+  "4": {
+    "inputs": {
+      "upscale_by": 2,
+      "seed": [
+        "20",
+        0
+      ],
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.1,
+      "mode_type": "Linear",
+      "tile_width": [
+        "8",
+        0
+      ],
+      "tile_height": [
+        "8",
+        1
+      ],
+      "mask_blur": 16,
+      "tile_padding": 64,
+      "seam_fix_mode": "None",
+      "seam_fix_denoise": 1,
+      "seam_fix_width": 64,
+      "seam_fix_mask_blur": 8,
+      "seam_fix_padding": 16,
+      "force_uniform_tiles": true,
+      "tiled_decode": false,
+      "image": [
+        "27",
+        0
+      ],
+      "model": [
+        "17",
+        0
+      ],
+      "positive": [
+        "13",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ],
+      "vae": [
+        "14",
+        0
+      ],
+      "upscale_model": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "UltimateSDUpscale",
+    "_meta": {
+      "title": "@upscale_factor-denoise"
+    }
+  },
+  "5": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "6": {
+    "inputs": {
+      "purge_cache": true,
+      "purge_models": true,
+      "anything": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "LayerUtility: PurgeVRAM V2",
+    "_meta": {
+      "title": "图层工具：清除VRAM V2"
+    }
+  },
+  "8": {
+    "inputs": {
+      "image": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "GetImageSize+",
+    "_meta": {
+      "title": "🔧 Get Image Size"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "拒绝, 限制, 不应答, lowres, error, cropped, worst quality, low quality, jpeg artifacts, heterochromia, out of frame, disfigured, blurry, fat, (ugly:1.3), deformed, mutilated, fingers cut, face cut, head cut, bad anatomy, bad proportions, two heads, two faces, deformed hands, (twisted fingers:1.22), extra fingers, poorly drawn, grainy, poorly drawn face, mutation, poor facial details, cropped head, poorly drawn eyes, unclear eyes, cross-eyes, malformed limbs, poorly drawn hands, fused hands, mutated hands, malformed hands, (mutated fingers:1.4), (fused fingers:1.313), interlocked fingers, extra or missing fingers, (one hand with more than 5 fingers), (one hand with less than 5 fingers), one hand with more than 5 digits, one hand with less than 5 digits, extra digits, fewer digits, bad hair, poorly drawn hair, fused hair, poorly drawn feet, malformed feet, extra or missing feet, fused feet, missing or extra limbs, disfigured, mutilated hands, extra hands, extra arms, extra legs, missing arms, missing hands, missing legs, fingers of different thickness, pointed fingers, thick fingers, (long thumbs:1.35), sharp fingernails, (greyscale:1.3), grain, (monochrome:1.3)",
+      "clip": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative Prompt"
+    }
+  },
+  "13": {
+    "inputs": {
+      "text": [
+        "24",
+        0
+      ],
+      "clip": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "14": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "15": {
+    "inputs": {
+      "model_name": "4x-UltraSharp.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "加载放大模型"
+    }
+  },
+  "16": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "17": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "18": {
+    "inputs": {
+      "lora_name": "Zimage\\ZiB-female解剖学_anatomy.safetensors",
+      "strength_model": 0.7,
+      "model": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "20": {
+    "inputs": {
+      "seed": 730337416698140
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "23": {
+    "inputs": {
+      "unet_name": "z_image\\ZIB-moodyWildMix_v01.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "24": {
+    "inputs": {
+      "preset_prompt": "Prompt Style - Extreme Detailed",
+      "custom_prompt": "用中文详细描述这张图像，并生成提示词。\n要求：只输出标准提示词，内容详尽细致（不用重复，不要使用任何标题，不要出现无关的文字和符号）",
+      "system_prompt": "",
+      "input_mode": "one by one",
+      "max_frames": 24,
+      "video_size": 256,
+      "seed": 410937018406343,
+      "llamamodel": [
+        "25",
+        0
+      ],
+      "parameters": [
+        "26",
+        0
+      ],
+      "images": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "llama_cpp_instruct_adv",
+    "_meta": {
+      "title": "Llama-cpp Instruct (Advanced)"
+    }
+  },
+  "25": {
+    "inputs": {
+      "model": "Qwen3-VL-8B-Instruct-abliterated-v2.0.Q4_K_M.gguf",
+      "mmproj_model": "Qwen3-VL-8B-Instruct-abliterated-v2.0.mmproj-f16.gguf",
+      "chat_handler": "Qwen3-VL",
+      "think_mode": false,
+      "n_ctx": 8192,
+      "n_gpu_layers": -1,
+      "keep_model_loaded": 0
+    },
+    "class_type": "llama_cpp_model_loader",
+    "_meta": {
+      "title": "Llama-cpp Model Loader"
+    }
+  },
+  "26": {
+    "inputs": {
+      "max_tokens": 1024,
+      "top_k": 30,
+      "top_p": 0.9,
+      "min_p": 0.05,
+      "typical_p": 1,
+      "temperature": 0.8,
+      "repeat_penalty": 1,
+      "frequency_penalty": 0,
+      "presence_penalty": 1,
+      "mirostat_mode": 0,
+      "mirostat_eta": 0.1,
+      "mirostat_tau": 5,
+      "image_min_tokens": 0,
+      "image_max_tokens": 512
+    },
+    "class_type": "llama_cpp_parameters",
+    "_meta": {
+      "title": "Llama-cpp Parameters"
+    }
+  },
+  "27": {
+    "inputs": {
+      "image": "20260301174439_00001_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "@输入图像"
+    }
+  },
+  "28": {
+    "inputs": {
+      "text_0": "一位年轻女性，拥有黑色长发，自然垂落，面带微笑，眼神温柔直视镜头。她身穿一套粉色系的性感睡衣套装，上衣为露胸设计，带有蕾丝花边装饰，下装是短款荷叶边裙装，同样点缀着蕾丝边饰。她的双腿穿着白色过膝袜，脚上是一双粉色洞洞鞋，鞋面有可爱的卡通图案装饰。她站在室内，背景中可见一架黑色钢琴的一部分，墙面为暖色调的纹理墙纸，地面铺设的是灰色方形瓷砖，瓷砖之间有米色花纹点缀。整体画面光线柔和，氛围温馨而略带甜美感。",
+      "text": [
+        "24",
+        0
+      ]
+    },
+    "class_type": "ShowText|pysssss",
+    "_meta": {
+      "title": "@Show Text 🐍"
+    }
+  }
+}

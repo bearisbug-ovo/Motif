@@ -7,7 +7,7 @@ interface SystemStore {
   loading: boolean
   fetchStatus: () => Promise<void>
   fetchConfig: () => Promise<void>
-  updateConfig: (body: Partial<SystemConfig>) => Promise<void>
+  updateConfig: (body: Partial<SystemConfig>) => Promise<SystemConfig & { restart_required?: boolean }>
 }
 
 export const useSystemStore = create<SystemStore>((set) => ({
@@ -33,7 +33,8 @@ export const useSystemStore = create<SystemStore>((set) => ({
   },
 
   updateConfig: async (body) => {
-    const config = await systemApi.updateConfig(body)
-    set({ config })
+    const result = await systemApi.updateConfig(body)
+    set({ config: result })
+    return result
   },
 }))

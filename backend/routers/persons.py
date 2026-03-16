@@ -12,6 +12,8 @@ from database import get_db
 from models.person import Person
 from models.album import Album
 from models.media import Media
+from models.platform_account import PlatformAccount
+from models.tag import Tag, person_tags
 
 router = APIRouter()
 
@@ -23,6 +25,7 @@ class PersonCreate(BaseModel):
 class PersonUpdate(BaseModel):
     name: Optional[str] = None
     cover_media_id: Optional[str] = None
+    tag_ids: Optional[list[str]] = None
 
 
 def _person_or_404(pid: str, db: Session) -> Person:
@@ -58,10 +61,24 @@ def _recalc_person_rating(person_id: str, db: Session) -> None:
 @router.get("")
 def list_persons(
     sort: str = Query("created_at", regex="^(created_at|avg_rating|name)$"),
+    sort_dir: str = Query("desc", regex="^(asc|desc)$"),
     filter_rating: Optional[str] = Query(None, description="e.g. gte:4"),
+    tag_ids: Optional[str] = Query(None, description="comma-separated tag IDs (intersection filter)"),
     db: Session = Depends(get_db),
 ):
+    from sqlalchemy import asc as sa_asc, desc as sa_desc
+
     q = select(Person)
+
+    # Tag intersection filter: person must have ALL specified tags
+    if tag_ids:
+        tid_list = [t.strip() for t in tag_ids.split(",") if t.strip()]
+        for tid in tid_list:
+            q = q.where(
+                Person.id.in_(
+                    select(person_tags.c.person_id).where(person_tags.c.tag_id == tid)
+                )
+            )
 
     if filter_rating:
         try:
@@ -78,12 +95,15 @@ def list_persons(
         else:
             raise HTTPException(status_code=400, detail="op must be eq/gte/lte")
 
+    direction = sa_asc if sort_dir == "asc" else sa_desc
     if sort == "avg_rating":
-        q = q.order_by(Person.avg_rating.desc().nullslast(), Person.created_at.desc())
+        col = direction(Person.avg_rating)
+        col = col.nullslast() if sort_dir == "desc" else col.nullsfirst()
+        q = q.order_by(col, Person.created_at.desc())
     elif sort == "name":
-        q = q.order_by(Person.name.asc())
+        q = q.order_by(direction(Person.name))
     else:
-        q = q.order_by(Person.created_at.desc())
+        q = q.order_by(direction(Person.created_at))
 
     persons = db.execute(q).scalars().all()
     return [_person_dict(p, db) for p in persons]
@@ -111,6 +131,13 @@ def update_person(pid: str, body: PersonUpdate, db: Session = Depends(get_db)):
         p.name = body.name
     if body.cover_media_id is not None:
         p.cover_media_id = body.cover_media_id
+    if body.tag_ids is not None:
+        # Full replace: clear existing tags, set new ones
+        db.execute(person_tags.delete().where(person_tags.c.person_id == pid))
+        for tid in body.tag_ids:
+            tag = db.get(Tag, tid)
+            if tag:
+                db.execute(person_tags.insert().values(person_id=pid, tag_id=tid))
     db.commit()
     db.refresh(p)
     return _person_dict(p, db)
@@ -184,6 +211,18 @@ def _person_dict(p: Person, db: Session) -> dict:
         ).scalar()
         cover_file_path = first
 
+    # Platform accounts linked to this person
+    accounts = db.execute(
+        select(PlatformAccount).where(PlatformAccount.person_id == p.id)
+    ).scalars().all()
+
+    # Tags
+    tag_rows = db.execute(
+        select(Tag).join(person_tags, person_tags.c.tag_id == Tag.id)
+        .where(person_tags.c.person_id == p.id)
+        .order_by(Tag.sort_order)
+    ).scalars().all()
+
     return {
         "id": p.id,
         "name": p.name,
@@ -193,6 +232,16 @@ def _person_dict(p: Person, db: Session) -> dict:
         "rated_count": p.rated_count,
         "media_count": media_count,
         "album_count": album_count,
-        "created_at": p.created_at.isoformat(),
-        "updated_at": p.updated_at.isoformat(),
+        "accounts": [
+            {
+                "id": a.id,
+                "platform": a.platform,
+                "username": a.username,
+                "display_name": a.display_name,
+            }
+            for a in accounts
+        ],
+        "tags": [{"id": t.id, "name": t.name} for t in tag_rows],
+        "created_at": p.created_at.isoformat() + "Z",
+        "updated_at": p.updated_at.isoformat() + "Z",
     }
