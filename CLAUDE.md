@@ -2,9 +2,28 @@
 
 ## 工作规范
 
-- **文档同步更新**：修改功能行为时，必须同步更新相关文档（`doc/prd.md`、`doc/development_guide.md`、`doc/test_plan.md`），保持需求、开发指南、测试用例与代码一致
+- **文档同步更新**：修改功能行为时，必须同步更新 `doc/modules/` 中对应模块文件，保持需求、API、测试用例与代码一致
 - **doc/ 命名规范**：统一 `snake_case.md`，不加项目前缀和版本号，版本信息写在文档内部 header，历史由 Git 管理
-- **E2E 测试截图审查**：所有前端 E2E 测试必须在关键视觉断言点调用 `screenshot()`（定义在 `frontend/tests/e2e/helpers.ts`，输出到 `frontend/tests/screenshots/{name}.png`）。测试通过判定 = **程序断言通过 + Claude 视觉审查截图确认正确**。运行测试后必须用 Read 工具逐张查看所有截图，验证页面布局、数据渲染、无错误状态
+- **功能验证**：完成功能开发后，通过 Claude in Chrome 实际操作验证
+- **Bug 复现优先**：用户报告问题时，先通过 Claude in Chrome 复现，确认根因后再修复，不要基于猜测直接改代码
+- **E2E 回归测试**：核心功能路径保留 E2E 测试（`screenshot()` 定义在 `frontend/tests/e2e/helpers.ts`，输出到 `frontend/tests/screenshots/{name}.png`），测试通过判定 = 程序断言通过 + Claude 视觉审查截图确认正确
+
+## 文档维护规则
+
+### 何时更新
+- **改功能行为**：更新 `doc/modules/` 中对应模块文件的相关章节
+- **新增 API**：先在模块文件的「API 端点」节写明接口定义，再实现代码
+- **改数据模型**：在同一模块文件内同步更新「数据模型」节和「测试用例」节
+- **新增模块**：创建 `doc/modules/新模块.md`，并在下方模块索引中添加条目
+
+### 何时不更新
+- 纯重构（不改外部行为）：不需要更新文档
+- 修 bug（行为回归到文档描述）：不需要更新文档
+- 改样式/动画：不需要更新文档
+
+### 文档 vs 代码冲突
+- 如果发现文档和代码不一致，**以代码为准**修正文档
+- 修正后在 commit message 注明 `docs: fix drift in xxx.md`
 
 ## 页面层级术语
 
@@ -16,10 +35,9 @@
 | **人物主页 · 散图区** | PersonHome 的散图列表部分 | — |
 | **图集详情** | 某图集的媒体列表页 | `/albums/:id` |
 | **任务队列** | 任务管理页 | `/tasks` |
-| **工作区** | 工作区页 | `/workspace` |
-| **回收站** | 回收站页 | `/recycle-bin` |
+| **工作流** | 工作流运行与管理页 | `/workflows` |
 | **小工具** | 网页抓取器等工具页 | `/tools` |
-| **设置** | 设置页 | `/settings` |
+| **设置** | 设置页（外观/服务/标签/工作区/回收站/控制台） | `/settings` |
 | **大图浏览 / LightBox** | 浮层大图查看器 | — |
 | **筛选栏** | FilterBar 组件 | — |
 | **侧边栏** | Sidebar 导航 | — |
@@ -38,7 +56,7 @@
 
 ## 项目概述
 
-Motif — 本地图片/视频浏览、管理、AI 修复与联想生成工具。以 ComfyUI 为 AI 后端，React PWA 前端，支持局域网多设备访问。核心：以人物为核心的媒体管理体系、不复制文件（路径引用）、任务严格串行队列。详细需求见 `doc/prd.md`。
+Motif — 本地图片/视频浏览、管理、AI 修复与联想生成工具。以 ComfyUI 为 AI 后端，React PWA 前端，支持局域网多设备访问。核心：以人物为核心的媒体管理体系、不复制文件（路径引用）、任务严格串行队列。
 
 ## 常用命令
 
@@ -63,129 +81,38 @@ npx jest --config jest.config.ts --runInBand --verbose
 "D:/ai/ComfyUI-aki-v1.6/python/python.exe" "D:/ai/ComfyUI-aki-v1.6/ComfyUI/main.py" --port 8188 --lowvram
 ```
 
-## 架构概览
+## 模块索引
 
-```
-backend/
-├── main.py                  # FastAPI 入口 + 文件选择器 API
-├── routers/
-│   ├── persons.py           # 人物 CRUD
-│   ├── albums.py            # 图集 CRUD
-│   ├── media.py             # 媒体 CRUD + 导入 + 评分 + 软删除
-│   ├── tasks.py             # 任务队列 CRUD + 执行控制
-│   ├── workspace.py         # 工作区
-│   ├── recycle_bin.py       # 回收站
-│   ├── downloads.py         # 网页抓取下载 + 平台账号
-│   └── system.py            # 系统配置 + ComfyUI 状态
-├── models/                  # ORM：person / album / media / task / workspace / platform_account / download_record
-├── scrapers/                # 网页抓取器（base + xiaohongshu）
-├── comfyui/
-│   ├── client.py            # ComfyUIClient
-│   ├── workflow.py          # WorkflowBuilder
-│   └── workflows/           # *.json 工作流模板
-├── queue_runner.py          # 后台串行任务队列调度线程
-└── config.py                # AppData 路径、全局设置管理
+改动功能时，读取对应模块文档获取完整上下文（数据模型 + API + 前端行为 + 测试用例）。
 
-frontend/src/
-├── pages/                   # MediaLibrary / PersonHome / AlbumDetail
-│                            # TaskQueue / Workspace / RecycleBin / Settings / Tools
-├── components/              # LightBox / ImportDialog / MediaCard / MaskEditor / ...
-├── stores/                  # person / album / media / task / workspace / system / download
-└── api/                     # http.ts + 各模块接口（含 downloads.ts）
+| 模块 | 文档 | 涉及代码 |
+|------|------|----------|
+| 人物/图集/媒体 | `doc/modules/person_album_media.md` | `routers/persons,albums,media` · `pages/MediaLibrary,PersonHome,AlbumDetail` |
+| 导入流程 | `doc/modules/import.md` | `routers/media`(import) · `components/ImportDialog` |
+| 大图浏览/视频 | `doc/modules/lightbox.md` | `components/lightbox/,video/` · `stores/lightbox` |
+| AI 任务/工作流 | `doc/modules/ai_tasks.md` | `routers/tasks,workflows` · `queue_runner` · `comfyui/` · `pages/TaskQueue,Tools,Workflows` |
+| 筛选与排序 | `doc/modules/filter_sort.md` | `components/FilterBar` · `stores/media`(filter state) |
+| 工作区/回收站 | `doc/modules/workspace_recyclebin.md` | `routers/workspace,recycle_bin` · `pages/Workspace,RecycleBin` |
+| 网页抓取/下载 | `doc/modules/downloads.md` | `routers/downloads` · `scrapers/` · `stores/download` |
+| 标签系统 | `doc/modules/tags.md` | `routers/tags` · `components/TagEditor` · `stores/tag` |
+| 设置/系统管理 | `doc/modules/settings_system.md` | `routers/system,launcher` · `pages/Settings,Dashboard` |
 
-AppData/（路径可配置，默认 backend/appdata/）
-├── db/main.sqlite
-├── cache/thumbnails/
-├── imports/clipboard/
-├── generated/upscale|inpaint|face_swap|portrait|screenshot/
-├── workflows/
-└── downloads/xiaohongshu/
-```
+## 系统级文档
 
-**关键设计**
+| 文档 | 说明 |
+|------|------|
+| `doc/architecture.md` | 技术栈、目录结构、设计原则、前端状态管理、环境搭建、Phase 规划 |
+| `doc/comfyui_guide.md` | ComfyUI 模型路径、插件、Gotcha、换脸工作流规范、可复用旧代码 |
+| `doc/test_strategy.md` | 测试环境配置、辅助函数、数据隔离策略、需求追溯矩阵 |
+| `doc/ui_improvement_plan.md` | P3-UI 前端视觉/体验/性能改造方案 |
+| `doc/user_manual.md` | 用户使用手册 |
 
-- **不复制文件**：本地图只存绝对路径引用，AppData 内生成图/截图除外
-- **SQLite WAL 模式**：支持多设备并发读取
-- **任务严格串行**：FastAPI 后台线程维护队列，一次只向 ComfyUI 提交一个任务
-- **ComfyUI 集成**：`/prompt` 提交，`/history` 轮询（2秒间隔），工作流模板占位符格式 `{{param_name}}`
-- **软删除**：本地图只删记录，生成图/截图软删后回收站永久删除时删物理文件
+## 原始参考文档（只读）
 
-## 数据模型要点
+以下为重构前的完整文档，保留作为产品全景参考，日常开发以 `doc/modules/` 为准：
 
-| 表 | 关键字段 |
-|---|---|
-| Person | id(UUID), name, cover_media_id, avg_rating, rated_count |
-| Album | id, person_id?, name, cover_media_id, is_generated_album, source_face_media_id |
-| Media | id, album_id?, person_id?, file_path, media_type(image/video), source_type(local/generated/screenshot), parent_media_id?, workflow_type?, generation_params(JSON), rating, is_deleted |
-| Task | id, workflow_type, params(JSON), status(pending/running/completed/failed), queue_order, execution_mode(immediate/queued), result_media_ids(JSON) |
-| WorkspaceItem | id, media_id(FK), sort_order（上限100条，持久化） |
-| PlatformAccount | id, platform, username, display_name?, person_id?(FK→Person) |
-| DownloadRecord | id, source_url, raw_text?, platform, account_id?(FK→PlatformAccount), title?, published_at?, media_count, album_id?(FK→Album), downloaded_at, status(pending/completed/failed), error_message? |
-
-**约束**：Media.person_id 当 album_id 不为空时必须等于 Album.person_id；生成链 parent_media_id 递归深度上限 10 层
-
-## Phase 规划
-
-- **P0 — 基础浏览与管理**：媒体库浏览（人物/图集/大图）、导入流程、评分/筛选/排序、回收站、设置页、ComfyUI 连接管理、启动脚本
-- **P1 — 核心 AI 功能**：高清放大、换脸（单张+批量）、局部修复（带提示词+自动反推）、任务队列（4种启动模式）、工作区
-- **P2 — 高级 AI 功能**：图生图（含提示词反推+润色）、写真生成、动作库（DWPose 管理+动作组）
-- **P3 — 扩展工具**：网页图片抓取器（小红书/B站/Twitter/Telegram/通用网页）、平台账号管理
-- **P3-UI — 前端 UI/UX 改进**：设计 token 三层架构、视觉升级、体验打磨、性能优化（详见 `doc/ui_improvement_plan.md`）
-
-## ComfyUI 环境
-
-**路径**：`D:\ai\ComfyUI-aki-v1.6`　**Python**：`D:\ai\ComfyUI-aki-v1.6\python\python.exe`
-
-**模型文件**（`ComfyUI\models\` 下）：
-
-| 用途 | 路径 |
-|---|---|
-| Z-Image Base（ZIB） | `diffusion_models/z_image/ZIB-moodyWildMix_v01.safetensors` |
-| Z-Image Base VAE | `vae/ae.safetensors` |
-| Z-Image Turbo | `diffusion_models/z_image_turbo_bf16.safetensors` |
-| Z-Image Turbo VAE | `vae/zImageClearVae_clear.safetensors` |
-| 解剖 LoRA | `loras/Zimage/ZiB-female解剖学_anatomy.safetensors`（strength=0.7） |
-| Text Encoder | `text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors` |
-| ControlNet Union | `model_patches/Z-Image-Fun-Controlnet-Union-2.1.safetensors` |
-| Qwen-Image-Edit UNET | `diffusion_models/Qwen-Rapid-NSFW-v18.1_Q4_K.gguf` |
-| Qwen-Image-Edit CLIP | `text_encoders/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf`（需同目录有 `mmproj-BF16.gguf`） |
-| Qwen-Image-Edit VAE | `vae/qwen_image_vae.safetensors` |
-
-**必装插件**：ComfyUI-GGUF、comfyui-easy-use、InsightFace、Inspyrenet、comfyui_controlnet_aux（DWPose）、ControlNet Union
-
-**关键 Gotcha**：
-- ControlNet Union 用 `ModelPatchLoader`（不是 `ControlNetLoader`），接 `QwenImageDiffsynthControlnet`
-- GGUF CLIP 需 `mmproj-BF16.gguf` 在同目录，工作流不选但自动加载
-- `easy imageRemBg` 必须 `add_background=white`，否则 RGBA 4通道触发 VL 编码器维度错误
-- 换脸用 GGUF Q4~Q6 + `qwen_image_vae.safetensors`，**不**用 fp8 safetensors + `ae.safetensors`（8GB OOM）
-- LoadImage API 调用须先 `upload_image` 上传到 ComfyUI `input/`，手动测试直接放 `input/` 目录
-
-## 换脸工作流规范（已验证）
-
-- 模型：`Qwen-Rapid-NSFW-v18.1_Q4_K.gguf` + `qwen_image_vae.safetensors`
-- CLIP：`CLIPLoaderGGUF` with `Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf` type=qwen_image
-- 架构：Kontext（TextEncodeQwenImageEditPlus + FluxKontextMultiReferenceLatentMethod）
-- 参数：steps=4, cfg=1, euler, simple, denoise=1.0, shift=3.1
-- 底图 → ImageScaleToTotalPixels(1MP) → VAEEncode → KSampler.latent
-- 人脸参考 → easy imageRemBg(white) → TextEncodeQwenImageEditPlus.image2
-- Prompt：`"将图中人物面部替换为参考图中的人脸，保持身体姿势、服装和背景完全不变，边缘自然融合"`
-
-## 可复用旧代码（main 分支）
-
-当前开发在 `rewrite/v2` 分支，旧代码保留在 `main` 分支。以下模块可复用：
-
-- `backend/comfyui/client.py`：ComfyUIClient（submit/watch_progress/get_image/upload_image）
-- `backend/comfyui/workflow.py`：WorkflowBuilder（JSON 模板 + nodes.json 参数注入）
-- `backend/comfyui/workflows/`：faceswap、dwpose、upscale 等工作流模板
-- 查看方式：`git show main:backend/comfyui/client.py`
-
-## 项目文档
-
-| 文档 | 路径 | 说明 |
-|---|---|---|
-| 产品需求文档 | `doc/prd.md` | 完整功能定义、UI 规格、数据模型、API 约定（P0-P3 全量） |
-| 开发指南 | `doc/development_guide.md` | 环境搭建、架构详解、全量 API 参考（~45 端点）、数据模型、前端状态管理 |
-| 测试计划 | `doc/test_plan.md` | Puppeteer E2E 测试用例，按 PRD 章节组织，含需求追溯矩阵 |
-| 图生图/写真 Spec | `doc/img2img_portrait_spec.md` | P2 图生图 & 写真生成方案验证草稿 |
-| UI/UX 改进计划 | `doc/ui_improvement_plan.md` | P3-UI 前端视觉/体验/性能改造方案，含影响分析与执行路线图 |
-| PRD 审查报告 | `doc/prd_review.md` | 历史文档，PRD 已据此修订完成 |
+| 文档 | 说明 |
+|------|------|
+| `doc/prd.md` | 产品需求文档全量（P0-P3） |
+| `doc/development_guide.md` | 开发指南全量（架构 + ~45 API 端点） |
+| `doc/test_plan.md` | 测试计划全量（按 PRD 章节组织） |
